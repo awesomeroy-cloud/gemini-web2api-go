@@ -27,7 +27,7 @@ func TestMCPListsMediaTools(t *testing.T) {
 		names = append(names, it.(map[string]interface{})["name"].(string))
 	}
 	got := strings.Join(names, ",")
-	if got != "web_search,generate_image,generate_music,create_video_task,get_video_status" {
+	if got != "web_search,generate_image,generate_music,create_video_task,get_video_status,generate_canvas,analyze_media,ask_gemini" {
 		t.Fatalf("tools = %s", got)
 	}
 }
