@@ -129,7 +129,8 @@ func dispatchMCP(req *rpcRequest) *rpcResponse {
 	case "tools/list":
 		return ok(map[string]interface{}{"tools": []interface{}{
 			webSearchToolDef(), generateImageToolDef(), generateMusicToolDef(),
-			createVideoTaskToolDef(), getVideoStatusToolDef()}})
+			createVideoTaskToolDef(), getVideoStatusToolDef(),
+			generateCanvasToolDef(), analyzeMediaToolDef(), askGeminiToolDef()}})
 
 	case "tools/call":
 		var p struct {
@@ -179,6 +180,28 @@ func dispatchMCP(req *rpcRequest) *rpcResponse {
 			}
 			withVideo, _ := p.Arguments["include_video"].(bool)
 			return ok(mcpVideoJobResult(j, withVideo))
+		case "generate_canvas":
+			prompt := strings.TrimSpace(getStr(p.Arguments, "prompt"))
+			if prompt == "" {
+				return ok(toolTextError("prompt 不能为空"))
+			}
+			text, err := mcpGenerateCanvas(prompt)
+			if err != nil {
+				return ok(toolTextError("生成失败: " + err.Error()))
+			}
+			return ok(mcpTextResult(text))
+		case "analyze_media":
+			text, err := mcpAnalyzeMedia(p.Arguments)
+			if err != nil {
+				return ok(toolTextError("分析失败: " + err.Error()))
+			}
+			return ok(mcpTextResult(text))
+		case "ask_gemini":
+			text, err := mcpAskGemini(p.Arguments)
+			if err != nil {
+				return ok(toolTextError("调用失败: " + err.Error()))
+			}
+			return ok(mcpTextResult(text))
 		default:
 			return fail(-32602, "unknown tool: "+p.Name)
 		}
