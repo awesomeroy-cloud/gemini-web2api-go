@@ -63,36 +63,38 @@ const (
 
 // ModelConfig holds the server-side model id plus the legacy MODE_CATEGORY value.
 type ModelConfig struct {
+	// AliasOf, when non-empty in models.json, inherits config from the target model.
+	AliasOf string `json:"alias_of,omitempty"`
 	// HexID 走 x-goog-ext-525001261-jspb header，是服务端唯一认的模型开关。
 	// 实测：不发这个 header 时 inner[79] 取 1..6 全部落到 3.5 Flash-Lite；
 	// header 写 3.6 而 inner[79] 写 6 时拿到的是 3.6 —— header 压过 inner[79]。
-	HexID string
-	Mode  int
-	Desc  string
+	HexID string `json:"hex_id,omitempty"`
+	Mode  int    `json:"mode,omitempty"`
+	Desc  string `json:"desc,omitempty"`
 	// Thinking 为真时填 inner[80]=2，即网页 UI 上的「扩展思考」。跟 HexID 正交
 	// —— 三个模型都能开，不是某个专属模型。
-	Thinking bool
+	Thinking bool `json:"thinking,omitempty"`
 	// ThinkWire >0 时直接作为思考档线值（header 下标15 / inner[80]），覆盖 Thinking
 	// 推出的 1/2。用于 4 Argon「中等」档（=thinkingMedium=4）。两者都不设 = 普通(1)。
-	ThinkWire int
+	ThinkWire int `json:"think_wire,omitempty"`
 	// Tool 非 0 时填 inner[49]，让服务端换后端模型生成媒体产物（14=生图 Nano Banana
 	// / 21=音乐 Lyria）。产物不在 StreamGenerate 响应里，要再走 hNvQHb 拿下载链、
 	// 用下载 host 认的 cookie 子集下回原始字节，见 media.go。跟登录态绑定：匿名请求
 	// 这个会被静默降级成一句「Are you signed in?」文本。
-	Tool int
+	Tool int `json:"tool,omitempty"`
 	// Upstream 是真用上这个模型时服务端自报的显示名（不含思考档后缀："3.1 Pro High"
 	// 记 "3.1 Pro"）。strict_model 拿它判静默降级，空 = 不判（媒体工具回报的是
 	// "Nano Banana 2" 这类后端名）。只能用显示名：跟它并排的 hex 现在不管实际用了
 	// 哪个模型都回 Flash-Lite 的那个。
-	Upstream string
+	Upstream string `json:"upstream,omitempty"`
 	// VideoAspect is the inner[55] aspect code for video: 16 = 16:9 (default), 17 = 9:16.
-	VideoAspect int
+	VideoAspect int `json:"video_aspect,omitempty"`
 	// PinAccountID forces the request onto one cookie-pool account (no fallback to
 	// others). Required to continue a conversation, which lives in that account.
-	PinAccountID int64
+	PinAccountID int64 `json:"-"`
 	// Cont, when set, sends this request as the next turn of an existing Gemini
 	// conversation (used for video extension: "reply to the video").
-	Cont *ConvRef
+	Cont *ConvRef `json:"-"`
 }
 
 // ConvRef identifies the turn to continue: conversation id, the previous turn's
@@ -127,6 +129,7 @@ var Models = map[string]ModelConfig{
 	// gemini-3.7-flash 保留为别名（同 hex）。
 	"gemini-3.8-flash": {HexID: hexFlash38, Mode: 1, Upstream: "3.8 Flash", Desc: "3.8 Flash; needs a signed-in PAID Google account (free accounts get downgraded to 3.5 Flash-Lite)"},
 	"gemini-3.7-flash": {HexID: hexFlash38, Mode: 1, Upstream: "3.8 Flash", Desc: "alias of gemini-3.8-flash (same hex; Google renamed 3.7→3.8)"},
+	"gemini-4-hydrogen": {HexID: hexFlash38, Mode: 1, Upstream: "4 Hydrogen", Desc: "4 Hydrogen (same hex as 3.8 Flash; needs a signed-in PAID Google account)"},
 	// 4 Argon（#35）：Mode=8 是真正的选择开关（见 hexArgon4 注释）。付费/Ultra 号专属，
 	// 免费号发它会被静默降级成 3.5 Flash-Lite，所以 gate 成要 cookie（modelNeedsLogin）。
 	"gemini-4-argon": {HexID: hexArgon4, Mode: 8, Upstream: "4 Argon", Desc: "4 Argon (complex tasks); needs a signed-in PAID/Ultra Google account (free accounts get downgraded to 3.5 Flash-Lite)"},
@@ -138,6 +141,7 @@ var Models = map[string]ModelConfig{
 	"gemini-3.1-pro-thinking":        {HexID: hexPro31, Mode: 3, Thinking: true, Upstream: "3.1 Pro", Desc: "3.1 Pro with extended thinking; needs a signed-in cookie"},
 	"gemini-3.8-flash-thinking":      {HexID: hexFlash38, Mode: 1, Thinking: true, Upstream: "3.8 Flash", Desc: "3.8 Flash with extended thinking; needs a signed-in cookie"},
 	"gemini-3.7-flash-thinking":      {HexID: hexFlash38, Mode: 1, Thinking: true, Upstream: "3.8 Flash", Desc: "alias of gemini-3.8-flash-thinking"},
+	"gemini-4-hydrogen-thinking":     {HexID: hexFlash38, Mode: 1, Thinking: true, Upstream: "4 Hydrogen", Desc: "4 Hydrogen with extended thinking; needs a signed-in cookie"},
 	// 4 Argon + 扩展思考：Mode=8（选 Argon）+ inner[80]=2（上游现在把这档叫 "High"）。
 	// 实测回报 "4 Argon High" 且带思考链（硬题 985 字符，走既有 [4][0][37][0][0] 路径，
 	// 无需改抽取代码）→ 映射成 reasoning_content。付费/Ultra 专属。
@@ -152,7 +156,9 @@ var Models = map[string]ModelConfig{
 	"gemini-music": {HexID: hexFlash36, Mode: 1, Tool: toolMusic, Desc: "Music generation (Lyria, ~30s); returns a base64 data URL; needs a signed-in cookie"},
 	"gemini-video": {HexID: hexFlash36, Mode: 1, Tool: toolVideo, Desc: "Video generation (Veo, async); returns a base64 data URL; needs a signed-in cookie (usually a paid account)"},
 	// 画布：生成 immersive 交互 HTML 文档，内联返回（不是二进制、不用下载）。要登录态。
-	"gemini-canvas": {HexID: hexFlash36, Mode: 1, Tool: toolCanvas, Desc: "Canvas: generates an interactive HTML document (returned inline as a ```html block); needs a signed-in cookie"},
+	"gemini-canvas":          {HexID: hexFlash36, Mode: 1, Tool: toolCanvas, Desc: "Canvas: generates an interactive HTML document (returned inline as a ```html block); needs a signed-in cookie"},
+	"gemini-deep-research":   {HexID: hexFlash36, Mode: 1, Tool: toolDeepResearch, Desc: "Deep Research mode; needs a signed-in cookie"},
+	"gemini-guided-learning": {HexID: hexFlash36, Mode: 1, Tool: toolGuidedLearning, Desc: "Guided Learning mode; needs a signed-in cookie"},
 }
 
 // hasCookie 表示 cookie 池里有没有可用账号。决定 3.1 Pro 是否出现在模型列表里。
@@ -201,11 +207,12 @@ func temporaryChatEligible() bool {
 // 登录也只能拿到 3.6 Flash 扩展」是在缺 XSRF token 的条件下测的，那时候带
 // cookie 的请求根本发不出去（见 xsrf.go）。
 func availableModels() map[string]ModelConfig {
+	all := getModels()
 	if hasCookie() {
-		return Models
+		return all
 	}
-	out := make(map[string]ModelConfig, len(Models))
-	for k, v := range Models {
+	out := make(map[string]ModelConfig, len(all))
+	for k, v := range all {
 		if modelNeedsLogin(v) {
 			continue
 		}
@@ -214,19 +221,19 @@ func availableModels() map[string]ModelConfig {
 	return out
 }
 
-// resolveModel maps a model name to its config.
+// ResolveModel maps a model name to its config.
 //
 // "name@think=N" 后缀会被剥掉并忽略。旧版本把它写进 inner[17] 当思考深度，
 // 那是误读：抓包显示 inner[17] 是会话内的轮次索引（首轮 [[0]]，带会话 id 的
 // 第二轮 [[1]]，逐轮递增），跟思考深度无关。我们每次都开新会话，该值恒为 0。
 // 后缀不报错只忽略，避免打断已经配了这个写法的客户端。
-func resolveModel(modelName string) (string, ModelConfig, error) {
+func ResolveModel(modelName string) (string, ModelConfig, error) {
 	if idx := strings.Index(modelName, "@think="); idx >= 0 {
 		modelName = modelName[:idx]
 	}
 	mc, ok := availableModels()[modelName]
 	if !ok {
-		if full, exists := Models[modelName]; exists && !hasCookie() {
+		if full, exists := getModels()[modelName]; exists && !hasCookie() {
 			downgrade := "are silently downgraded to 3.5 Flash-Lite"
 			if full.Tool > 0 {
 				downgrade = "are silently downgraded to a plain \"Are you signed in?\" text reply"
@@ -239,6 +246,10 @@ func resolveModel(modelName string) (string, ModelConfig, error) {
 		return "", ModelConfig{}, fmt.Errorf("unknown model: %s", modelName)
 	}
 	return modelName, mc, nil
+}
+
+func resolveModel(modelName string) (string, ModelConfig, error) {
+	return ResolveModel(modelName)
 }
 
 // StreamResult holds raw body + per-request proxy + timing info.
@@ -395,28 +406,30 @@ type fileRef struct {
 // 匿名能把文件传上去，但对话里一引用就被服务端回 1100。
 func streamGenerateWithFiles(prompt, latest string, mc ModelConfig, pending []pendingUpload,
 	onDelta, onReasoning func(string)) (*StreamResult, error) {
-	// strict_model 换号：被降级的号记冷却、本次排除，换下一个号重来。上限跟 XSRF 换号
-	// 一样是 maxCookieTries——连着几个号都降级，说明池子整体见底，不是撞上个别号。
-	exclude := map[int64]bool{}
-	var res *StreamResult
-	var err error
-	for try := 0; try < maxCookieTries; try++ {
-		next, nextErr := streamGenerateOnce(prompt, latest, mc, pending, onDelta, onReasoning, exclude)
-		var exhausted *ModelDowngradedError
-		if try > 0 && errors.As(nextErr, &exhausted) && exhausted.Reported == "" {
-			// 换号时已经没号可挑：报上一个号真实的降级（带自报模型名），补上解冻时间
-			var last *ModelDowngradedError
-			if errors.As(err, &last) {
-				last.RetryAfter = exhausted.RetryAfter
+	return withRefusalRetry(mc, func() (*StreamResult, error) {
+		// strict_model 换号：被降级的号记冷却、本次排除，换下一个号重来。上限跟 XSRF 换号
+		// 一样是 maxCookieTries——连着几个号都降级，说明池子整体见底，不是撞上个别号。
+		exclude := map[int64]bool{}
+		var res *StreamResult
+		var err error
+		for try := 0; try < maxCookieTries; try++ {
+			next, nextErr := streamGenerateOnce(prompt, latest, mc, pending, onDelta, onReasoning, exclude)
+			var exhausted *ModelDowngradedError
+			if try > 0 && errors.As(nextErr, &exhausted) && exhausted.Reported == "" {
+				// 换号时已经没号可挑：报上一个号真实的降级（带自报模型名），补上解冻时间
+				var last *ModelDowngradedError
+				if errors.As(err, &last) {
+					last.RetryAfter = exhausted.RetryAfter
+				}
+				return res, err
 			}
-			return res, err
+			res, err = next, nextErr
+			if !retryOnAnotherAccount(res, err, mc, exclude) {
+				return res, err
+			}
 		}
-		res, err = next, nextErr
-		if !retryOnAnotherAccount(res, err, mc, exclude) {
-			return res, err
-		}
-	}
-	return res, err
+		return res, err
+	})
 }
 
 func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pendingUpload,
@@ -1390,7 +1403,10 @@ func probeGemini(prompt, proxyURL string) ProbeResult {
 	inner[59] = uuid.NewString()
 	inner[61] = []interface{}{}
 	inner[68] = 1
-	probeModel := Models["gemini-3.6-flash"]
+	probeModel := getModels()["gemini-3.6-flash"]
+	if probeModel.HexID == "" {
+		probeModel = Models["gemini-3.6-flash"]
+	}
 	inner[79] = probeModel.Mode
 
 	innerJSON, _ := json.Marshal(inner)

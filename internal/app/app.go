@@ -51,6 +51,9 @@ func Run() {
 		fmt.Fprintf(os.Stderr, "config load error: %v\n", err)
 		os.Exit(1)
 	}
+	if err := initModelsStore(*configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "models config load warning: %v\n", err)
+	}
 	if *port > 0 {
 		cfg.Port = *port
 	}
@@ -82,6 +85,7 @@ func Run() {
 	resolvedAPIKey := initAPIKey(*apiKey)
 	initTokenizer()
 	startScheduler()
+	startAuditMaintenance()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", requireAPIKey(func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +118,7 @@ func Run() {
 			writeJSON(w, 405, map[string]string{"error": "method not allowed"})
 		}
 	}))
+	mux.HandleFunc("/v1/messages", requireAPIKey(handleAnthropicMessages))
 	// /v1/videos —— OpenAI(Sora) 形状的异步视频生成。POST 建任务，GET 轮询，GET .../content 下 MP4。
 	mux.HandleFunc("/v1/videos", requireAPIKey(handleCreateVideo))
 	mux.HandleFunc("/v1/videos/", requireAPIKey(handleVideoItem))
@@ -151,12 +156,16 @@ func Run() {
 		mux.HandleFunc("/admin/api/cookies/", requireAuth(handleAdminCookieItem))
 		mux.HandleFunc("/admin/api/test", requireAuth(handleAdminTest))
 		mux.HandleFunc("/admin/api/video-quota", requireAuth(handleAdminVideoQuota))
+		mux.HandleFunc("/admin/api/audits", requireAuth(handleAdminAudits))
+		mux.HandleFunc("/admin/api/audits/", requireAuth(handleAdminAuditItem))
+		mux.HandleFunc("/admin/api/models", requireAuth(handleAdminModels))
+		mux.HandleFunc("/admin/api/conversations", requireAuth(handleAdminConversations))
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      auditMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0, // streaming responses can be long
 	}

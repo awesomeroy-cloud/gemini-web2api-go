@@ -382,6 +382,19 @@
   .ck-extra { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
   /* 逐项模式列了 7 个框，窄屏下别把弹窗撑爆 */
   .modal.wide { width: min(620px, 94vw); }
+  .audit-detail { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.45);
+    display: flex; align-items: flex-start; justify-content: center; padding: 4vh 2vw; overflow: auto; }
+  .audit-detail .box { background: var(--card); border-radius: 20px; padding: 20px 24px;
+    width: min(1100px, 96vw); box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+  .audit-detail .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 16px;
+    font-size: 12.5px; margin: 10px 0 14px; }
+  .audit-detail .meta b { color: var(--muted); font-weight: 500; margin-right: 6px; }
+  .audit-pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    background: var(--surface-hi); border-radius: 10px; padding: 10px 12px; max-height: 55vh; overflow: auto; margin: 6px 0 12px; }
+  .audit-detail details summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
+  #audTable tbody tr[data-id] { cursor: pointer; }
+  .audit-filters input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border, #ccc);
+    background: var(--card); color: inherit; font-size: 13px; width: 120px; }
 
   @media (max-width: 1100px) { .grid-main { grid-template-columns: 1fr; } }
   @media (max-width: 900px) {
@@ -571,48 +584,57 @@ const pages = {
     `;
   },
 
-  requests: async () => {
+  audits: async () => {
     return `
       <div class="panel page-fill">
-        <h2>请求记录
-          <span class="controls">
-            <select id="reqStatus">
+        <h2>审计日志
+          <span class="controls audit-filters">
+            <select id="audStatus">
               <option value="">全部</option>
               <option value="ok">成功</option>
               <option value="fail">失败</option>
             </select>
-            <select id="reqModel"><option value="">全部模型</option></select>
-            <select id="reqSize">
+            <select id="audIssue" title="问题分类">
+              <option value="">全部分类</option>
+              <option value="problem">所有异常</option>
+            </select>
+            <select id="audModel"><option value="">全部模型</option></select>
+            <select id="audAccount"><option value="">全部账号</option></select>
+            <select id="audFinish"><option value="">全部结束原因</option></select>
+            <label class="muted" style="font-size:12px;white-space:nowrap"><input type="checkbox" id="audTools" style="width:auto"> 有工具调用</label>
+            <input id="audPath" placeholder="接口路径">
+            <input id="audQ" placeholder="搜索内容/IP/账号/UA/响应 id">
+            <input id="audSince" type="datetime-local" title="起始时间">
+            <input id="audUntil" type="datetime-local" title="结束时间">
+            <select id="audSize">
               <option value="25">每页 25</option>
               <option value="50" selected>每页 50</option>
               <option value="100">每页 100</option>
-              <option value="200">每页 200</option>
             </select>
-            <button onclick="loadReqs()">刷新</button>
+            <button onclick="audReload(false)">刷新</button>
+            <label class="muted" style="font-size:12px;white-space:nowrap" title="停在第一页、页面可见、没开详情时每 5 秒刷新"><input type="checkbox" id="audAuto" style="width:auto"> 自动刷新</label>
+            <button class="btn muted" onclick="audExport()">导出本页</button>
           </span>
         </h2>
+        <div class="muted" id="audInfo" style="font-size:12px;margin:-4px 0 8px"></div>
         <div class="table-scroll">
-          <table id="reqTable">
+          <table id="audTable">
             <colgroup>
-              <col style="width:140px"><col style="width:150px"><col style="width:130px">
-              <col style="width:96px"><col style="width:70px"><col style="width:84px">
-              <col style="width:84px"><col style="width:110px"><col style="width:64px">
-              <col style="width:64px"><col>
+              <col style="width:140px"><col style="width:110px"><col style="width:150px"><col style="width:120px">
+              <col style="width:64px"><col style="width:76px"><col style="width:76px"><col style="width:56px">
+              <col style="width:90px"><col>
             </colgroup>
             <thead><tr>
-              <th class="nw">时间</th><th class="nw">模型</th><th class="nw">实际模型</th>
-              <th class="nw">出口</th><th class="nw">账号</th><th class="nw">状态</th>
-              <th class="nw">首字</th><th class="nw">总用时</th>
-              <th class="nw">输入</th><th class="nw">输出</th><th>接口</th>
+              <th class="nw">时间</th><th class="nw">IP</th><th class="nw">模型</th><th class="nw">实际模型</th>
+              <th class="nw">状态</th><th class="nw">首字</th><th class="nw">总用时</th><th class="nw">保活</th>
+              <th class="nw">tokens</th><th>接口 / 请求 / 回复</th>
             </tr></thead>
-            <tbody><tr><td colspan="11" class="empty">加载中...</td></tr></tbody>
+            <tbody><tr><td colspan="10" class="empty">加载中...</td></tr></tbody>
           </table>
         </div>
-        <div class="pager" id="reqPager"></div>
-      </div>
-    `;
+        <div class="pager" id="audPager"></div>
+      </div>`;
   },
-
   proxies: async () => {
     const data = await api('api/proxies');
     return `
@@ -734,6 +756,53 @@ const pages = {
             </tbody>
           </table>
         </div>
+      </div>
+    `;
+  },
+
+  models: async () => {
+    const data = await api('api/models');
+    const models = data.models || {};
+    const names = Object.keys(models).sort();
+    const jsonText = JSON.stringify(models, null, 2);
+    return `
+      <div class="panel">
+        <h2>模型配置
+          <span class="controls">
+            <button onclick="refreshPage()">刷新</button>
+          </span>
+        </h2>
+        <p class="lede">
+          配置文件：<code>${escapeHtml(data.path || 'models.json')}</code>，支持别名（<code>alias_of</code>）与热更新，保存后立刻生效，无需重启。
+        </p>
+        <div class="table-scroll" style="margin-bottom:16px">
+          <table>
+            <thead><tr>
+              <th class="nw">模型 ID</th><th class="nw">别名指向</th><th class="nw">Header</th><th class="nw">Tools</th><th>描述</th>
+            </tr></thead>
+            <tbody>
+              ${names.map(n => {
+                const m = models[n] || {};
+                const tools = Array.isArray(m.tools) ? m.tools.join(', ') : '';
+                return `<tr>
+                  <td class="nw pre">${escapeHtml(n)}</td>
+                  <td class="nw pre">${m.alias_of ? escapeHtml(m.alias_of) : '—'}</td>
+                  <td class="pre truncate" style="max-width:220px" title="${escapeHtml(m.header_value || '')}">${escapeHtml(m.header_value || '—')}</td>
+                  <td class="nw pre">${escapeHtml(tools || '—')}</td>
+                  <td>${escapeHtml(m.desc || '—')}</td>
+                </tr>`;
+              }).join('') || '<tr><td colspan="5" class="empty">暂无模型配置</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+          <b>models.json 编辑</b>
+          <span style="display:flex;gap:8px;align-items:center">
+            <span id="modelsSaveMsg" class="muted" style="font-size:12px"></span>
+            <button class="btn" onclick="saveModelsConfig()">保存并热更新</button>
+          </span>
+        </div>
+        <textarea id="modelsJsonEditor" spellcheck="false" style="width:100%;min-height:360px;font-family:var(--mono);font-size:12.5px;padding:12px;border-radius:12px;border:1px solid var(--border,#ccc);background:var(--surface-hi);color:inherit;box-sizing:border-box">${escapeHtml(jsonText)}</textarea>
       </div>
     `;
   },
@@ -924,75 +993,203 @@ async function loadChart(range = '24h') {
   });
 }
 
-let reqOffset = 0;
-// 每页条数由「每页 N」下拉决定；页面还没渲染时退回 50
-function reqPageSize() {
-  const el = document.getElementById('reqSize');
-  return el ? parseInt(el.value, 10) : 50;
+// 审计日志：唯一的请求记录数据源。keyset 分页（按 id），列表只拿摘要，详情点开再取。
+const aud = { cursor: null, dir: null, first: null, last: null, hasOlder: false, hasNewer: false, busy: 0, timer: null, models: false };
+const audPageSize = () => parseInt(document.getElementById('audSize')?.value || '50', 10);
+const audTime = (id) => {
+  const v = document.getElementById(id)?.value;
+  return v ? Math.floor(new Date(v).getTime() / 1000) : '';
+};
+// 文本框：停止输入 400ms 后再查；下拉/时间：立即查。都会回到第一页。
+function audReload(debounce) {
+  clearTimeout(aud.timer);
+  const go = () => { aud.cursor = null; aud.dir = null; loadAudits(); };
+  if (debounce) aud.timer = setTimeout(go, 400); else go();
 }
-async function loadReqs() {
-  const status = document.getElementById('reqStatus')?.value || '';
-  const model = document.getElementById('reqModel')?.value || '';
-  const url = `api/requests?limit=${reqPageSize()}&offset=${reqOffset}` +
-              (status ? '&status=' + status : '') +
-              (model ? '&model=' + encodeURIComponent(model) : '');
-  const data = await api(url);
-  const tbody = document.querySelector('#reqTable tbody');
+function audPage(dir) {
+  if (dir === 'older') { aud.cursor = aud.last; aud.dir = 'before_id'; }
+  else if (dir === 'newer') { aud.cursor = aud.first; aud.dir = 'after_id'; }
+  else { aud.cursor = null; aud.dir = null; }
+  loadAudits();
+}
+async function loadAudits() {
+  const p = new URLSearchParams({ limit: audPageSize() });
+  const add = (k, v) => { if (v !== '' && v != null) p.set(k, v); };
+  add('status', document.getElementById('audStatus')?.value || '');
+  add('model', document.getElementById('audModel')?.value || '');
+  add('issue', document.getElementById('audIssue')?.value || '');
+  add('account', document.getElementById('audAccount')?.value || '');
+  add('finish', document.getElementById('audFinish')?.value || '');
+  if (document.getElementById('audTools')?.checked) p.set('tools', '1');
+  add('path', (document.getElementById('audPath')?.value || '').trim());
+  add('q', (document.getElementById('audQ')?.value || '').trim());
+  add('since', audTime('audSince'));
+  add('until', audTime('audUntil'));
+  if (aud.cursor && aud.dir) p.set(aud.dir, aud.cursor);
+  if (!aud.models) p.set('models', '1');
+  const seq = ++aud.busy;
+  const data = await api('api/audits?' + p.toString());
+  if (seq !== aud.busy) return;            // 期间又发了新查询，丢弃旧结果
+  const tbody = document.querySelector('#audTable tbody');
   if (!tbody) return;
-  tbody.innerHTML = (data.items || []).map(r => `
-    <tr>
+  const items = data.items || [];
+  aud.items = items;
+  aud.first = items.length ? items[0].id : null;
+  aud.last = items.length ? items[items.length - 1].id : null;
+  aud.hasOlder = !!data.has_older;
+  aud.hasNewer = !!data.has_newer;
+  const okRow = (r) => r.status >= 200 && r.status < 300 && !r.error;
+  const rows = new Array(items.length);
+  for (let i = 0; i < items.length; i++) {
+    const r = items[i];
+    rows[i] = `<tr data-id="${r.id}">
       <td class="nw muted">${fmt.ts(r.ts)}</td>
-      <td class="truncate" title="${escapeHtml(r.model)}">${escapeHtml(r.model)}</td>
-      <td class="nw">${upstreamCell(r)}</td>
-      <td class="nw truncate">${r.proxy_name ? escapeHtml(t(r.proxy_name)) : '<span class="badge muted">' + t('直连') + '</span>'}</td>
-      <td class="nw truncate" title="${escapeHtml(r.account_label || '')}">${
-        r.account_id ? escapeHtml(r.account_label || ('#' + r.account_id))
-                     : '<span class="badge muted">' + t('匿名') + '</span>'}</td>
-      <td class="nw">${r.status === 200 ? '<span class="badge ok">200</span>' : '<span class="badge fail">' + r.status + '</span>'}</td>
-      <td class="num nw">${fmt.ms(r.ttfb_ms)}</td>
+      <td class="nw truncate" title="${escapeHtml(r.client_ip)}">${escapeHtml(r.client_ip)}</td>
+      <td class="truncate" title="${escapeHtml(r.model)}">${escapeHtml(r.model || '-')}</td>
+      <td class="nw truncate">${upstreamCell(r.model, r.served_model)}${r.account ? '<div class="muted" style="font-size:11px">' + escapeHtml(r.account) + (r.attempts > 1 ? ' · ' + t('重试') + ' ' + (r.attempts - 1) : '') + '</div>' : ''}</td>
+      <td class="nw"><span class="badge ${okRow(r) ? 'ok' : 'fail'}">${r.status}</span>${issueTag(r.issue)}</td>
+      <td class="num nw">${fmt.ms(r.first_data_ms || r.ttfb_ms)}</td>
       <td class="num nw">${fmt.ms(r.total_ms)}</td>
-      <td class="num nw">${fmt.num(r.prompt_tokens)}</td>
-      <td class="num nw">${fmt.num(r.output_tokens)}</td>
-      <td><span class="pre">${escapeHtml(r.endpoint)}${r.stream ? ' <span class="badge muted">stream</span>' : ''}</span>
-        ${r.error ? '<div class="pre clamp2" style="color:var(--fail);margin-top:4px" title="'
-          + escapeHtml(t(r.error)) + '"><b>' + t('错误：') + '</b>' + escapeHtml(t(r.error)) + '</div>' : ''}
-      </td>
-    </tr>`).join('') || '<tr><td colspan="11" class="empty">还没有请求记录</td></tr>';
-  const size = reqPageSize();
+      <td class="num nw">${r.pings || ''}</td>
+      <td class="num nw" title="${tokTitle(r)}">${(r.prompt_tokens || r.output_tokens) ? fmt.num(r.prompt_tokens) + ' / ' + fmt.num(r.output_tokens) : '-'}</td>
+      <td><span class="pre">${escapeHtml(r.method)} ${escapeHtml(r.path)}${r.stream ? ' <span class="badge muted">stream</span>' : ''}${r.finish_reason ? ' <span class="badge muted">' + escapeHtml(r.finish_reason) + '</span>' : ''}${r.tool_call_count ? ' <span class="badge warn">' + r.tool_call_count + ' tool</span>' : ''}</span>
+        ${r.params_summary ? '<div class="muted" style="font-size:11px;margin-top:2px">' + escapeHtml(r.params_summary) + '</div>' : ''}
+        ${r.request_preview ? '<div class="clamp2 muted" style="margin-top:3px">› ' + escapeHtml(r.request_preview) + '</div>' : ''}
+        ${r.reply_preview ? '<div class="clamp2" style="margin-top:2px">‹ ' + escapeHtml(r.reply_preview) + '</div>' : ''}
+        ${r.error ? '<div class="pre clamp2" style="color:var(--fail);margin-top:4px"><b>' + t('错误：') + '</b>' + escapeHtml(r.error) + '</div>' : ''}
+      </td></tr>`;
+  }
+  tbody.innerHTML = rows.join('') || `<tr><td colspan="10" class="empty">${t('还没有审计记录')}</td></tr>`;
   const total = data.total || 0;
-  const page = Math.floor(reqOffset / size) + 1;
-  const pages = Math.max(Math.ceil(total / size), 1);
-  const from = total ? reqOffset + 1 : 0;
-  const to = Math.min(reqOffset + size, total);
-  document.getElementById('reqPager').innerHTML = `
-    <span class="muted">${from}-${to} / ${LANG === 'en' ? 'total ' + total + ' items' : '共 ' + total + ' 条'}</span>
+  const totalTxt = (data.total_capped ? '>' : '') + fmt.num(Math.min(total, 10000));
+  const info = document.getElementById('audInfo');
+  if (info) info.textContent = (LANG === 'en'
+    ? `Model API calls only · ${totalTxt} matching · kept ${data.retention_days} days · ${(data.size_bytes / 1048576).toFixed(1)} MB · query ${data.query_ms}ms · click a row for full request/reply`
+    : `仅记录模型调用 · 匹配 ${totalTxt} 条 · 保留 ${data.retention_days} 天 · 占用 ${(data.size_bytes / 1048576).toFixed(1)} MB · 查询 ${data.query_ms}ms · 点击行查看完整请求与回复`);
+  document.getElementById('audPager').innerHTML = `
+    <span class="muted">${items.length ? '#' + aud.first + ' – #' + aud.last : ''}</span>
     <span class="pager-btns">
-      <button class="btn muted" ${reqOffset === 0 ? 'disabled' : ''}
-        onclick="reqOffset=0;loadReqs()">${t('最前')}</button>
-      <button class="btn muted" ${reqOffset === 0 ? 'disabled' : ''}
-        onclick="reqOffset=Math.max(0,reqOffset-${size});loadReqs()">${t('上一页')}</button>
-      <span class="muted" style="min-width:80px;text-align:center">${LANG === 'en' ? 'Page ' + page + ' / ' + pages : '第 ' + page + ' / ' + pages + ' 页'}</span>
-      <button class="btn muted" ${to >= total ? 'disabled' : ''}
-        onclick="reqOffset+=${size};loadReqs()">${t('下一页')}</button>
-      <button class="btn muted" ${to >= total ? 'disabled' : ''}
-        onclick="reqOffset=${(pages-1)*size};loadReqs()">${t('最后')}</button>
-    </span>
-  `;
-  if (LANG === 'en') {
-    translateTree(tbody, true);
-    const pager = document.getElementById('reqPager');
-    if (pager) translateTree(pager, true);
+      <button class="btn muted" ${aud.hasNewer ? '' : 'disabled'} onclick="audPage('latest')">${t('最新')}</button>
+      <button class="btn muted" ${aud.hasNewer ? '' : 'disabled'} onclick="audPage('newer')">${t('上一页')}</button>
+      <button class="btn muted" ${aud.hasOlder ? '' : 'disabled'} onclick="audPage('older')">${t('下一页')}</button>
+    </span>`;
+  if (LANG === 'en') translateTree(tbody, true);
+  const sel = document.getElementById('audModel');
+  if (sel && data.models && !aud.models) {
+    aud.models = true;
+    const opts = (arr) => (arr || []).map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+    sel.insertAdjacentHTML('beforeend', opts(data.models));
+    document.getElementById('audAccount')?.insertAdjacentHTML('beforeend', opts(data.accounts));
+    document.getElementById('audFinish')?.insertAdjacentHTML('beforeend', opts(data.finish_reasons));
+    (data.issues || []).forEach(i => { ISSUE_LABEL[i.id] = i.label; });
+    document.getElementById('audIssue')?.insertAdjacentHTML('beforeend',
+      (data.issues || []).map(i => `<option value="${i.id}">${escapeHtml(t(i.label))}</option>`).join(''));
   }
-  // populate model dropdown from current page (best-effort)
-  const sel = document.getElementById('reqModel');
-  if (sel && sel.options.length === 1) {
-    const seen = new Set();
-    (data.items || []).forEach(r => seen.add(r.model));
-    [...seen].forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m; opt.text = m; sel.appendChild(opt);
-    });
+}
+
+function prettyJSON(s) {
+  if (!s) return '';
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return s; }
+}
+
+// 问题分类（后端 classifyAudit）；标签表在第一次 models=1 时由后端补全
+const ISSUE_LABEL = { ok: '正常', auth: '鉴权失败', rate_limit: '限流', blocked: '出口被拦', invalid: '请求无效', too_large: '请求过大', timeout: '超时', empty_upstream: '上游空响应', upstream: '上游错误', server: '服务端错误', stream_error: '流内错误', gemini_error: 'Gemini 报错回复', empty_reply: '空回复', downgrade: '模型被降级', client_gone: '客户端断开', refused_retry: '拒答已重试' };
+const ISSUE_WARN = { downgrade: 1, gemini_error: 1, empty_reply: 1, client_gone: 1, refused_retry: 1, invalid: 1, too_large: 1, rate_limit: 1 };
+function issueTag(issue) {
+  if (!issue || issue === 'ok') return '';
+  return ` <span class="badge ${ISSUE_WARN[issue] ? 'warn' : 'fail'}" title="${escapeHtml(issue)}">${escapeHtml(t(ISSUE_LABEL[issue] || issue))}</span>`;
+}
+function tokTitle(r) {
+  const parts = [`in ${r.prompt_tokens || 0}`, `out ${r.output_tokens || 0}`];
+  if (r.cached_tokens) parts.push(`cached ${r.cached_tokens}`);
+  if (r.reasoning_tokens) parts.push(`reasoning ${r.reasoning_tokens}`);
+  if (r.total_tokens) parts.push(`total ${r.total_tokens}`);
+  return parts.join(' · ');
+}
+function downloadJSON(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function audExport() {
+  downloadJSON(`audits-page-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.json`, aud.items || []);
+}
+function audAutoTick() {
+  if (currentPage !== 'audits' || !document.getElementById('audAuto')?.checked) {
+    clearInterval(aud.auto); aud.auto = null; return;
   }
+  if (document.visibilityState !== 'visible' || aud.cursor || document.querySelector('.audit-detail')) return;
+  loadAudits();
+}
+function headersTable(json) {
+  if (!json) return '';
+  let obj;
+  try { obj = JSON.parse(json); } catch (e) { return escapeHtml(json); }
+  return Object.entries(obj).map(([k, v]) => `<b>${escapeHtml(k)}</b>: ${escapeHtml(String(v))}`).join('\n');
+}
+
+async function openAudit(id) {
+  const r = await api('api/audits/' + id);
+  if (r.error && !r.id) { alert(r.error); return; }
+  const ov = document.createElement('div');
+  ov.className = 'audit-detail';
+  const m = (k, v, cls) => (v === '' || v == null) ? '' : `<div${cls ? ' class="' + cls + '"' : ''}><b>${t(k)}</b>${escapeHtml(String(v))}</div>`;
+  const block = (title, body, open, html) => body ? `<details ${open ? 'open' : ''}><summary>${t(title)}</summary><div class="audit-pre">${html ? body : escapeHtml(body)}</div></details>` : '';
+  const streamMs = r.stream && r.first_data_ms ? r.total_ms - r.first_data_ms : null;
+  let calls = [];
+  try { calls = r.tool_calls ? JSON.parse(r.tool_calls) : []; } catch (e) {}
+  const callsHTML = calls.map(c => `<b>${escapeHtml(c.name || '?')}</b>${c.id ? ' <span class="muted">' + escapeHtml(c.id) + '</span>' : ''}\n${escapeHtml(prettyJSON(c.arguments))}`).join('\n\n');
+  ov.innerHTML = `<div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 style="margin:0">#${r.id} · ${escapeHtml(r.method)} ${escapeHtml(r.path)} ${r.issue && r.issue !== 'ok' ? issueTag(r.issue) : '<span class="badge ok">' + t('正常') + '</span>'}</h3>
+      <span style="display:flex;gap:6px">
+        <button class="btn muted" data-copy>${t('复制回复')}</button>
+        <button class="btn muted" data-dl>${t('导出 JSON')}</button>
+        <button class="btn muted" data-close>${t('关闭')}</button>
+      </span>
+    </div>
+    <div class="meta">
+      ${m('时间', fmt.ts(r.ts))}${m('IP', r.client_ip)}${m('状态', r.status)}${m('结束原因', r.finish_reason)}
+      ${m('模型', r.model)}${m('实际模型', r.served_model)}${m('账号', r.account)}${m('出口', r.proxy || (r.account ? t('直连') : ''))}
+      ${m('流式', r.stream ? 'yes' : 'no')}${m('上游尝试', r.attempts ? r.attempts + (r.attempts > 1 ? ' (' + t('重试') + ' ' + (r.attempts - 1) + ')' : '') : '')}
+      ${m('响应 id', r.resp_id)}${m('key 指纹', r.key_fp)}
+      ${m('响应头', fmt.ms(r.ttfb_ms))}${m('首字', fmt.ms(r.first_data_ms))}${m('总用时', fmt.ms(r.total_ms))}
+      ${m('流式输出时长', streamMs != null ? fmt.ms(streamMs) : '')}
+      ${m('上游首包', r.upstream_ttfb_ms ? fmt.ms(r.upstream_ttfb_ms) : '')}${m('上游总耗时', r.upstream_ms ? fmt.ms(r.upstream_ms) : '')}
+      ${m('保活', r.pings ? r.pings + ' (' + fmt.ms(r.first_data_ms) + ' ' + t('等待') + ')' : '0')}${m('数据块', r.chunks)}
+      ${m('输入 tokens', r.prompt_tokens)}${m('输出 tokens', r.output_tokens)}
+      ${m('缓存 tokens', r.cached_tokens || '')}${m('思考 tokens', r.reasoning_tokens || '')}${m('总 tokens', r.total_tokens || '')}
+      ${m('原始响应', fmt.num(r.raw_bytes) + ' B' + (r.raw_truncated ? ' (' + t('截断') + ')' : ''))}${m('Content-Type', r.content_type)}
+      ${m('UA', r.user_agent)}
+    </div>
+    ${r.params_summary ? '<div class="muted" style="margin:-4px 0 10px;font-size:12.5px">' + escapeHtml(r.params_summary) + '</div>' : ''}
+    ${r.error ? '<div class="audit-pre" style="color:var(--fail)">' + escapeHtml(r.error) + '</div>' : ''}
+    <h4 style="margin:6px 0">${t('回复')}</h4>
+    <div class="audit-pre">${escapeHtml(r.reply || '') || '<span class="muted">' + t('（无文字回复）') + '</span>'}</div>
+    ${block('工具调用', callsHTML, true, true)}
+    ${block('思考过程', r.reasoning, false)}
+    ${block('System prompt', r.system_prompt, false)}
+    ${block('请求参数', prettyJSON(r.params), false)}
+    ${block('请求体', prettyJSON(r.request_body), false)}
+    ${block('请求头（原样，含凭据）', headersTable(r.req_headers), false, true)}
+    ${block('响应头', headersTable(r.res_headers), false, true)}
+    ${block('原始响应（已去掉保活）', r.raw, false)}
+  </div>`;
+  document.body.appendChild(ov);
+  if (LANG === 'en') translateTree(ov, true);
+  const close = () => { ov.remove(); document.removeEventListener('keydown', esc); };
+  const esc = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', esc);
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('[data-close]').onclick = close;
+  ov.querySelector('[data-dl]').onclick = () => downloadJSON(`audit-${r.id}.json`, r);
+  ov.querySelector('[data-copy]').onclick = async () => {
+    try { await navigator.clipboard.writeText(r.reply || ''); flash(t('已复制')); } catch (e) { flash(t('复制失败')); }
+  };
 }
 
 // ── 运行时配置 ───────────────────────────────────────────────────────────────
@@ -1050,9 +1247,9 @@ const RT_GROUPS = [
     title: '会话与账号',
     fields: [
       { k: 'auto_delete_conversation', label: '自动删网页会话', type: 'bool',
-        hint: '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应' },
+        hint: '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应。开了「临时对话」时不需要（会话本就不进列表）；走「服务端多轮续接」的请求不删（续接要靠这条会话），要它们也不进列表请开「临时对话」' },
       { k: 'temporary_chat', label: '临时对话', type: 'bool',
-        hint: '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义；开了「服务端多轮续接」时不生效（临时对话不留列表，多轮要靠服务端留会话）' },
+        hint: '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义。开了「服务端多轮续接」也生效：临时对话本身能多轮续聊，只是不进列表' },
       { k: 'multi_turn', label: '服务端多轮续接', type: 'bool',
         hint: '走 Gemini 原生服务端多轮：按历史前缀认出这是上一轮的续接，命中就只发最新一句、历史留在服务端，同一串对话复用同一个 gemini 会话（不再每发一条就新开一个）。匿名/登录都行，带图或带工具时不生效。首轮/重启/改历史会退回整段重发。默认关' },
       { k: 'image_upscale', label: '生图下载原图/放大', type: 'bool',
@@ -1072,6 +1269,8 @@ const RT_GROUPS = [
         hint: '关：直接报错，能立刻发现该换号了（默认）。开：继续跑，但 3.1 Pro 会被静默降级成 3.5 Flash-Lite、思考链消失，客户端看不出来' },
       { k: 'strict_model', label: '严格模型校验', type: 'bool',
         hint: '开：服务端自报的模型跟请求的不一致时（通常是这个号这一档额度用完、被静默降级），不把降级后的回答当成功返回，而是换下一个号重试；全池都被降级就回 429 insufficient_quota（code: model_downgraded）。流式在吐出第一个字之前就判断。关：照常返回降级后的回答（默认）' },
+      { k: 'refusal_retry', label: '拒答自动重试', type: 'bool',
+        hint: 'Gemini 偶尔不答题、只回一句模板（「我只是一个语言模型…」「I\'m having a hard time fulfilling your request」「I encountered an error doing what you asked」），网页上点重试就好。开着时检测到这种短回复就当新会话重发，最多 2 次（临时对话照旧生效）；3.5 Flash-Lite 和生图/音乐/视频等工具模型不重试。流式会先攒约 120 字再往外吐，好在拒答时换掉。审计里记为「拒答已重试」。默认开' },
       { k: 'strict_model_cooldown_min', label: '降级冷却（分钟）', type: 'int', min: 0, max: 10080,
         hint: '严格模型校验开着时，被降级的号在这个模型上歇多久再用。网页端用量按 5 小时窗口算，默认 300；0=不记，每次请求都重新试' },
     ],
@@ -1194,11 +1393,11 @@ function escapeHtml(s) {
 // 媒体模型例外：生图/音乐的后端名（Nano Banana / Lyria）跟请求名本来就不同，是预期
 // 映射不是降级——真失败会直接报错不落 200 记录，所以这里把它们当"一致"，不误标黄。
 const upstreamExpected = { image: 'nanobanana', music: 'lyria' };
-function upstreamCell(r) {
-  const up = r.upstream_model || '';
+function upstreamCell(model, up) {
+  up = up || '';
   if (!up) return '<span class="badge muted">—</span>';
   const norm = t => (t || '').toLowerCase().replace(/[\s._-]/g, '').replace(/^gemini/, '');
-  const nm = norm(r.model), nu = norm(up);
+  const nm = norm(model), nu = norm(up);
   const same = nu.startsWith(nm.slice(0, 6)) ||
                (upstreamExpected[nm] && nu.startsWith(upstreamExpected[nm]));
   return same
@@ -1782,12 +1981,26 @@ async function switchPage(name, force = false) {
     document.getElementById('rangeSel').onchange = (e) => loadChart(e.target.value);
     await populateTestProxies();
   }
-  if (name === 'requests') {
-    reqOffset = 0;
-    document.getElementById('reqStatus').onchange = () => { reqOffset = 0; loadReqs(); };
-    document.getElementById('reqModel').onchange = () => { reqOffset = 0; loadReqs(); };
-    document.getElementById('reqSize').onchange = () => { reqOffset = 0; loadReqs(); };
-    await loadReqs();
+  if (name === 'audits') {
+    aud.cursor = null; aud.dir = null; aud.models = false;
+    ['audStatus', 'audIssue', 'audModel', 'audAccount', 'audFinish', 'audTools', 'audSize', 'audSince', 'audUntil'].forEach(id =>
+      document.getElementById(id).onchange = () => audReload(false));
+    document.getElementById('audAuto').onchange = (e) => {
+      clearInterval(aud.auto); aud.auto = null;
+      if (e.target.checked) aud.auto = setInterval(audAutoTick, 5000);
+    };
+    ['audPath', 'audQ'].forEach(id => {
+      const el = document.getElementById(id);
+      el.oninput = () => audReload(true);
+      el.onkeydown = (e) => { if (e.key === 'Enter') audReload(false); };
+    });
+    // 事件委托：整张表一个监听，不给每行挂 onclick
+    document.querySelector('#audTable tbody').onclick = (e) => {
+      if (e.target.closest('a,button')) return;
+      const tr = e.target.closest('tr[data-id]');
+      if (tr) openAudit(+tr.dataset.id);
+    };
+    await loadAudits();
   }
   if (name === 'settings') {
     await loadRtCfg();
@@ -1797,11 +2010,36 @@ async function switchPage(name, force = false) {
 // 主动重新拉当前页的数据（「刷新」按钮、增删改之后回填）
 function refreshPage() { return switchPage(currentPage, true); }
 
+async function saveModelsConfig() {
+  const el = document.getElementById('modelsJsonEditor');
+  const msg = document.getElementById('modelsSaveMsg');
+  if (!el) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(el.value);
+  } catch (e) {
+    if (msg) { msg.style.color = 'var(--fail)'; msg.textContent = 'JSON 解析失败: ' + e.message; }
+    return;
+  }
+  const res = await api('api/models', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ models: parsed }),
+  });
+  if (res && res.error) {
+    if (msg) { msg.style.color = 'var(--fail)'; msg.textContent = res.error; }
+    return;
+  }
+  flash(t('模型配置已保存并热更新'));
+  refreshPage();
+}
+
 // 侧栏图标（Material Symbols 风格的简化路径，内联避免外部依赖）
 const ICONS = {
   dashboard: '<path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>',
-  requests: '<path d="M7 5h14v2H7V5zm0 6h14v2H7v-2zm0 6h14v2H7v-2zM3 4.5a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zm0 6a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zm0 6a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"/>',
+  audits: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 7V3.5L18.5 9H13zM8 13h8v2H8v-2zm0 4h8v2H8v-2zm0-8h3v2H8V9z"/>',
   proxies: '<path d="M12 2a2.5 2.5 0 011 4.79V9h4a2 2 0 012 2v1.21a2.5 2.5 0 11-2 0V11h-4v1.21a2.5 2.5 0 11-2 0V11H7v1.21a2.5 2.5 0 11-2 0V11a2 2 0 012-2h4V6.79A2.5 2.5 0 0112 2z"/>',
+  models: '<path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/>',
   settings: '<path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/>',
   cookies: '<path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm7 3a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM8 13a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm6 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>',
   menu: '<path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>',
@@ -1812,14 +2050,15 @@ const ICONS = {
 };
 const NAV = [
   ['dashboard', '概览'],
-  ['requests', '请求记录'],
+  ['audits', '审计日志'],
   ['proxies', '代理池'],
   ['cookies', 'Cookie 池'],
+  ['models', '模型配置'],
   ['settings', '设置'],
   ['about', '关于'],
 ];
 const PAGE_TITLES = {
-  dashboard: '概览', requests: '请求记录', proxies: '代理池', cookies: 'Cookie 池', settings: '设置',
+  dashboard: '概览', audits: '审计日志', proxies: '代理池', cookies: 'Cookie 池', models: '模型配置', settings: '设置',
   about: '关于',
 };
 
@@ -2144,6 +2383,22 @@ const I18N_EN = {
   '距离封禁红线': 'Distance to ban threshold',
   '刷新': 'Refresh',
   '还没有任何请求经过': 'No requests have passed through yet',
+  '审计日志': 'Audit log', '最新': 'Latest', '全部分类': 'All categories', '所有异常': 'All problems',
+  '全部账号': 'All accounts', '全部结束原因': 'All finish reasons', '有工具调用': 'Has tool calls', '自动刷新': 'Auto refresh',
+  '导出本页': 'Export page', '复制回复': 'Copy reply', '导出 JSON': 'Export JSON', '结束原因': 'Finish', '账号': 'Account',
+  '出口': 'Egress', '上游尝试': 'Upstream attempts', '重试': 'retry', '响应 id': 'Response id', 'key 指纹': 'Key fingerprint',
+  '流式输出时长': 'Streaming time', '上游首包': 'Upstream TTFB', '上游总耗时': 'Upstream total', '等待': 'wait',
+  '数据块': 'Chunks', '缓存 tokens': 'Cached tokens', '思考 tokens': 'Reasoning tokens', '总 tokens': 'Total tokens',
+  '工具调用': 'Tool calls', '请求参数': 'Request params', '请求头（原样，含凭据）': 'Request headers (verbatim, incl. credentials)',
+  '已复制': 'Copied', '复制失败': 'Copy failed', '截断': 'truncated',
+  '鉴权失败': 'Auth failed', '限流': 'Rate limited', '出口被拦': 'Egress blocked', '请求无效': 'Invalid request',
+  '请求过大': 'Too large', '超时': 'Timeout', '上游空响应': 'Empty upstream', '上游错误': 'Upstream error',
+  '服务端错误': 'Server error', '流内错误': 'Stream error', 'Gemini 报错回复': 'Gemini error reply', '空回复': 'Empty reply',
+  '模型被降级': 'Downgraded', '客户端断开': 'Client gone', '还没有审计记录': 'No audit records yet', '接口路径': 'Path', '搜索内容/IP': 'Search text/IP',
+  '起始时间': 'From', '结束时间': 'Until', '回复': 'Reply', '思考过程': 'Reasoning', '请求体': 'Request body',
+  '原始响应（已去掉保活）': 'Raw response (keepalive pings removed)', '（无文字回复）': '(no text reply)',
+  '保活': 'Pings', '响应头': 'Headers', '流式': 'Stream', '原始响应': 'Raw', '输入 tokens': 'Input tokens',
+  '输出 tokens': 'Output tokens', '关闭': 'Close',
   '这条线是怎么来的': 'Where this line comes from',
   '连通性诊断': 'Connectivity test',
   '测试一次': 'Test once',
@@ -2364,7 +2619,7 @@ const I18N_EN = {
   '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应':
     'Automatically deletes the conversation on gemini.google.com after completion to prevent account clutter. Logged-in only, asynchronous best-effort; deletion failure does not affect the response',
   '临时对话': 'Temporary chat',
-  '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义；开了「服务端多轮续接」时不生效（临时对话不留列表，多轮要靠服务端留会话）':
+  '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义。开了「服务端多轮续接」也生效：临时对话本身能多轮续聊，只是不进列表':
     'Uses web-native "Temporary Chat" (inner[45]=1): conversations never enter account history and are not used for training. Cleaner than auto-delete and eliminates the delete request. Effective only when logged in; inactive if "Server multi-turn resume" is enabled (temporary chat leaves no history, multi-turn requires server sessions)',
   '服务端多轮续接': 'Server multi-turn resume',
   '走 Gemini 原生服务端多轮：按历史前缀认出这是上一轮的续接，命中就只发最新一句、历史留在服务端，同一串对话复用同一个 gemini 会话（不再每发一条就新开一个）。匿名/登录都行，带图或带工具时不生效。首轮/重启/改历史会退回整段重发。默认关':
@@ -2769,5 +3024,933 @@ function toggleLang() {
   i18nInit();
 })();
 </script>
+<style>
+  .badge-mcp {
+    background: #f3e8ff;
+    color: #6b21a8;
+    border: 1px solid #e9d5ff;
+    font-family: var(--mono);
+  }
+  .badge-media {
+    background: #e0f2fe;
+    color: #0369a1;
+    border: 1px solid #bae6fd;
+  }
+  .audit-sec-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 16px 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--outline-soft);
+  }
+  .audit-sec-head h4 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .media-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 8px 0 12px;
+  }
+  .media-card {
+    border: 1px solid var(--outline-soft);
+    border-radius: 12px;
+    padding: 10px;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .media-img, .msg img {
+    max-width: 100%;
+    max-height: 60vh;
+    border-radius: 8px;
+    cursor: zoom-in;
+    display: block;
+    object-fit: contain;
+    background: #0f172a;
+  }
+  .media-video, .msg video {
+    max-width: 100%;
+    max-height: 60vh;
+    border-radius: 8px;
+    display: block;
+    background: #000;
+  }
+  .media-audio, .msg audio {
+    width: 100%;
+    display: block;
+  }
+  .media-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .media-meta-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .mcp-card {
+    border: 1px solid #e9d5ff;
+    border-radius: 12px;
+    background: #fbf8ff;
+    overflow: hidden;
+    margin: 8px 0 12px;
+  }
+  .mcp-card-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #f3e8ff;
+    border-bottom: 1px solid #e9d5ff;
+    font-size: 12.5px;
+  }
+  .mcp-card-body {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .mcp-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .fmt {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 8px 0 12px;
+  }
+  .msg {
+    border-radius: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--outline-soft);
+    background: var(--bg);
+  }
+  .msg.msg-user {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+  }
+  .msg.msg-assistant {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+  }
+  .msg.msg-system {
+    background: #fffbeb;
+    border-color: #fde68a;
+  }
+  .msg.msg-tool {
+    background: #faf5ff;
+    border-color: #e9d5ff;
+  }
+  .msg-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .role-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    font-family: var(--mono);
+    color: #fff;
+    background: #64748b;
+  }
+  .role-badge.role-user { background: #2563eb; }
+  .role-badge.role-assistant { background: #16a34a; }
+  .role-badge.role-system { background: #d97706; }
+  .role-badge.role-tool { background: #9333ea; }
+  .role-extra {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .msg p {
+    margin: 0 0 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+  .msg p:last-child { margin-bottom: 0; }
+  .tool-block {
+    margin: 6px 0;
+    border-radius: 8px;
+    border: 1px solid #e9d5ff;
+    background: #fbf8ff;
+    overflow: hidden;
+  }
+  .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #f3e8ff;
+    border-bottom: 1px solid #e9d5ff;
+    font-size: 12px;
+  }
+  .tool-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #7e22ce;
+    color: #fff;
+    font-family: var(--mono);
+  }
+  .tool-name {
+    font-weight: 600;
+    font-family: var(--mono);
+    color: #6b21a8;
+  }
+  .tool-id {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-left: auto;
+  }
+  .tool-args {
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    max-height: 280px;
+  }
+  .tool-no-args {
+    padding: 8px 10px;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--muted);
+  }
+  .code-box {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    overflow: auto;
+    max-height: 48vh;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: #0f172a;
+  }
+  .code-box code {
+    background: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    white-space: inherit;
+    word-break: inherit;
+    overflow-wrap: inherit;
+  }
+  .json-k { color: #0284c7; font-weight: 600; }
+  .json-s { color: #15803d; }
+  .json-n { color: #c2410c; }
+  .json-l { color: #7e22ce; font-weight: 600; }
+  details.audit-raw {
+    margin: 8px 0;
+    border: 1px solid var(--outline-soft);
+    border-radius: 10px;
+    background: var(--card);
+    overflow: hidden;
+  }
+  details.audit-raw > summary {
+    padding: 8px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--surface-hi);
+    color: var(--text-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    list-style: none;
+  }
+  details.audit-raw > summary::-webkit-details-marker { display: none; }
+  details.audit-raw > summary:hover { background: var(--surface-press); }
+  details.audit-raw > .code-box,
+  details.audit-raw > .audit-pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    max-height: 50vh;
+  }
+</style>
+<script>
+(function() {
+  const MAX_DISPLAY_CHARS = 120000;
+  const L = (zh, en) => (typeof LANG !== 'undefined' && LANG === 'en') ? en : zh;
+
+  function safeSrc(src) {
+    if (typeof src !== 'string') return '';
+    const s = src.trim();
+    if (/^data:(image|audio|video)\//i.test(s)) return s;
+    if (s.startsWith('/admin/api/audits/')) return s;
+    if (/^https?:\/\//i.test(s)) return s;
+    return '';
+  }
+
+  function fmtBytes(n) {
+    if (n == null || isNaN(n)) return '';
+    const v = Number(n);
+    if (v < 1024) return v + ' B';
+    if (v < 1048576) return (v / 1024).toFixed(1) + ' KB';
+    return (v / 1048576).toFixed(2) + ' MB';
+  }
+
+  function clipText(str, max) {
+    if (typeof str !== 'string') str = String(str == null ? '' : str);
+    if (str.length <= max) return { text: str, clipped: false };
+    return { text: str.slice(0, max), clipped: true, total: str.length };
+  }
+
+  function highlightJson(val) {
+    if (val == null || val === '') return '<span class="muted">' + escapeHtml(L('（空）', '(empty)')) + '</span>';
+    let str = val;
+    if (typeof val === 'object') {
+      try { str = JSON.stringify(val, null, 2); } catch (e) { str = String(val); }
+    } else if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (trimmed.length <= MAX_DISPLAY_CHARS && ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
+        try { str = JSON.stringify(JSON.parse(trimmed), null, 2); } catch (e) { str = val; }
+      }
+    } else {
+      str = String(val);
+    }
+    const c = clipText(str, MAX_DISPLAY_CHARS);
+    const escaped = escapeHtml(c.text);
+    const suffix = c.clipped
+      ? '\n<span class="muted">' + escapeHtml(L(`... [已截断预览，共 ${c.total} 字符]`, `... [preview clipped at ${c.total} chars]`)) + '</span>'
+      : '';
+    if (c.clipped) return escaped + suffix;
+    const tokenRe = /("(?:\\u[0-9a-fA-F]{4}|\\[^u]|[^\\"])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+    return escaped.replace(tokenRe, function(match, strMatch, colon, literal) {
+      if (strMatch) {
+        if (colon) return '<span class="json-k">' + strMatch + '</span>' + colon;
+        return '<span class="json-s">' + strMatch + '</span>';
+      }
+      if (literal) return '<span class="json-l">' + literal + '</span>';
+      return '<span class="json-n">' + match + '</span>';
+    });
+  }
+
+  function renderMediaSummaryBadges(ms) {
+    if (!ms || typeof ms !== 'object') return '';
+    const out = [];
+    if (ms.mcp_tool) {
+      out.push(`<span class="badge badge-mcp">MCP: ${escapeHtml(ms.mcp_tool)}</span>`);
+    }
+    const imgs = (ms.req_images || 0) + (ms.res_images || 0);
+    const auds = (ms.req_audio || 0) + (ms.res_audio || 0);
+    const vids = (ms.req_video || 0) + (ms.res_video || 0);
+    if (imgs > 0) out.push(`<span class="badge badge-media">🖼 ${imgs} ${L('图', imgs === 1 ? 'img' : 'imgs')}</span>`);
+    if (auds > 0) out.push(`<span class="badge badge-media">🎵 ${auds} ${L('音频', 'audio')}</span>`);
+    if (vids > 0) out.push(`<span class="badge badge-media">🎬 ${vids} ${L('视频', 'video')}</span>`);
+    return out.length ? ' ' + out.join(' ') : '';
+  }
+
+
+  function createMediaCard(item) {
+    if (!item || typeof item !== 'object') return null;
+    const url = safeSrc(item.url || item.src);
+    if (!url) return null;
+    const mime = (item.mime || '').split(';')[0].trim().toLowerCase();
+    const kind = item.kind || (mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'file');
+
+    const card = document.createElement('div');
+    card.className = 'media-card';
+
+    if (kind === 'image') {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      const img = document.createElement('img');
+      img.className = 'media-img';
+      img.loading = 'lazy';
+      img.src = url;
+      img.alt = item.alt || '';
+      link.append(img);
+      card.append(link);
+    } else if (kind === 'audio') {
+      const audio = document.createElement('audio');
+      audio.className = 'media-audio';
+      audio.controls = true;
+      audio.preload = 'metadata';
+      audio.src = url;
+      card.append(audio);
+    } else if (kind === 'video') {
+      const video = document.createElement('video');
+      video.className = 'media-video';
+      video.controls = true;
+      video.preload = 'metadata';
+      video.src = url;
+      card.append(video);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'media-meta';
+    const info = document.createElement('span');
+    info.className = 'media-meta-info';
+    const parts = [];
+    if (item.mime) parts.push(item.mime);
+    const sz = item.human_size || fmtBytes(item.bytes);
+    if (sz) parts.push(sz);
+    if (item.source) parts.push(item.source);
+    info.textContent = parts.join(' · ') || kind;
+    meta.append(info);
+
+
+    card.append(meta);
+    return card;
+  }
+
+  function renderMediaGallery(mediaList) {
+    if (!Array.isArray(mediaList) || !mediaList.length) return null;
+    const grid = document.createElement('div');
+    grid.className = 'media-gallery';
+    for (const item of mediaList) {
+      const card = createMediaCard(item);
+      if (card) grid.append(card);
+    }
+    return grid.children.length ? grid : null;
+  }
+
+  function renderTextContent(container, text) {
+    const c = clipText(text, MAX_DISPLAY_CHARS);
+    if (c.clipped) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      pre.textContent = c.text + '\n... ' + L(`[内容过长已截断，共 ${c.total} 字符]`, `[clipped at ${c.total} chars]`);
+      container.append(pre);
+      return;
+    }
+    const codeRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+    let hasCode = false;
+    while ((match = codeRegex.exec(text)) !== null) {
+      hasCode = true;
+      if (match.index > lastIndex) {
+        const p = document.createElement('p');
+        p.textContent = text.slice(lastIndex, match.index);
+        container.append(p);
+      }
+      const lang = (match[1] || '').toLowerCase();
+      const codeBody = match[2];
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const code = document.createElement('code');
+      const trimmed = codeBody.trim();
+      if (lang === 'json' || (!lang && (trimmed.startsWith('{') || trimmed.startsWith('[')))) {
+        code.innerHTML = highlightJson(codeBody);
+      } else {
+        code.textContent = codeBody;
+      }
+      pre.append(code);
+      container.append(pre);
+      lastIndex = match.index + match[0].length;
+    }
+    if (!hasCode) {
+      const p = document.createElement('p');
+      p.textContent = text;
+      container.append(p);
+    } else if (lastIndex < text.length) {
+      const p = document.createElement('p');
+      p.textContent = text.slice(lastIndex);
+      container.append(p);
+    }
+  }
+
+  function renderBlocks(blocks) {
+    if (!Array.isArray(blocks) || !blocks.length) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'fmt';
+    let msg = null;
+    for (const block of blocks) {
+      if (!block) continue;
+      if (block.kind === 'role') {
+        msg = document.createElement('div');
+        const r = (block.role || block.text || 'default').toLowerCase().split(/[\s·]/)[0].trim();
+        const validRoles = ['system', 'user', 'assistant', 'tool'];
+        const roleClass = validRoles.includes(r) ? r : 'default';
+        msg.className = 'msg msg-' + roleClass;
+
+        const header = document.createElement('div');
+        header.className = 'msg-header';
+        const badge = document.createElement('span');
+        badge.className = 'role-badge role-' + roleClass;
+        badge.textContent = (block.role || r).toUpperCase();
+        header.append(badge);
+
+        const extraText = block.name || block.tool_call_id || (block.text && block.text.toLowerCase() !== r ? block.text.replace(new RegExp('^' + r + '\\s*·?\\s*', 'i'), '') : '');
+        if (extraText) {
+          const extra = document.createElement('span');
+          extra.className = 'role-extra';
+          extra.textContent = extraText;
+          header.append(extra);
+        }
+        msg.append(header);
+        wrap.append(msg);
+        continue;
+      }
+      if (!msg) {
+        msg = document.createElement('div');
+        msg.className = 'msg msg-default';
+        wrap.append(msg);
+      }
+      if (block.kind === 'tool') {
+        const toolBox = document.createElement('div');
+        toolBox.className = 'tool-block';
+        const toolHead = document.createElement('div');
+        toolHead.className = 'tool-header';
+        const toolTag = document.createElement('span');
+        toolTag.className = 'tool-tag';
+        toolTag.textContent = 'TOOL CALL';
+        const toolName = document.createElement('span');
+        toolName.className = 'tool-name';
+        toolName.textContent = block.name || 'tool';
+        toolHead.append(toolTag, toolName);
+        if (block.call_id) {
+          const callId = document.createElement('span');
+          callId.className = 'tool-id';
+          callId.textContent = '#' + block.call_id;
+          toolHead.append(callId);
+        }
+        toolBox.append(toolHead);
+
+        const args = block.arguments;
+        if (args && String(args).trim()) {
+          const pre = document.createElement('pre');
+          pre.className = 'code-box tool-args';
+          const code = document.createElement('code');
+          code.innerHTML = highlightJson(args);
+          pre.append(code);
+          toolBox.append(pre);
+        } else {
+          const emptyArgs = document.createElement('div');
+          emptyArgs.className = 'tool-no-args';
+          emptyArgs.textContent = L('（无参数）', '(no arguments)');
+          toolBox.append(emptyArgs);
+        }
+        msg.append(toolBox);
+        continue;
+      }
+      if (block.kind === 'json') {
+        const pre = document.createElement('pre');
+        pre.className = 'code-box';
+        const code = document.createElement('code');
+        code.innerHTML = highlightJson(block.raw || block.text || '');
+        pre.append(code);
+        msg.append(pre);
+        continue;
+      }
+      if (block.kind === 'image' || block.kind === 'audio' || block.kind === 'video') {
+        const src = safeSrc(block.src);
+        if (!src) continue;
+        if (block.kind === 'image') {
+          const a = document.createElement('a');
+          a.href = src;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          const img = document.createElement('img');
+          img.loading = 'lazy';
+          img.src = src;
+          img.alt = block.alt || '';
+          a.append(img);
+          msg.append(a);
+        } else {
+          const el = document.createElement(block.kind);
+          el.controls = true;
+          el.preload = 'metadata';
+          el.src = src;
+          msg.append(el);
+        }
+        if (block.mime || block.human_size) {
+          const meta = document.createElement('div');
+          meta.className = 'media-meta';
+          meta.style.marginTop = '4px';
+          const info = document.createElement('span');
+          info.className = 'media-meta-info';
+          info.textContent = [block.mime, block.human_size || fmtBytes(block.bytes)].filter(Boolean).join(' · ');
+          meta.append(info);
+          msg.append(meta);
+        }
+        continue;
+      }
+      const text = block.text || '';
+      if (text) renderTextContent(msg, text);
+    }
+    return wrap.children.length ? wrap : null;
+  }
+
+  function renderMcpCard(mcp) {
+    if (!mcp || typeof mcp !== 'object') return null;
+    const card = document.createElement('div');
+    card.className = 'mcp-card';
+
+    const head = document.createElement('div');
+    head.className = 'mcp-card-head';
+    const tag = document.createElement('span');
+    tag.className = 'tool-tag';
+    tag.textContent = 'MCP';
+    head.append(tag);
+
+    if (mcp.method) {
+      const m = document.createElement('span');
+      m.className = 'badge muted';
+      m.textContent = mcp.method;
+      head.append(m);
+    }
+    if (mcp.tool) {
+      const tn = document.createElement('span');
+      tn.className = 'tool-name';
+      tn.textContent = mcp.tool;
+      head.append(tn);
+    }
+    if (mcp.is_error) {
+      const err = document.createElement('span');
+      err.className = 'badge fail';
+      err.textContent = 'ERROR';
+      head.append(err);
+    }
+    if (mcp.tools_count > 0) {
+      const tc = document.createElement('span');
+      tc.className = 'badge muted';
+      tc.textContent = mcp.tools_count + ' tools';
+      head.append(tc);
+    }
+    if (mcp.rpc_id != null) {
+      const rid = document.createElement('span');
+      rid.className = 'tool-id';
+      rid.textContent = 'id: ' + mcp.rpc_id;
+      head.append(rid);
+    }
+    card.append(head);
+
+    const body = document.createElement('div');
+    body.className = 'mcp-card-body';
+
+    const argsRaw = mcp.arguments_pretty || (mcp.arguments && Object.keys(mcp.arguments).length ? mcp.arguments : null);
+    if (argsRaw) {
+      const lbl = document.createElement('div');
+      lbl.className = 'mcp-label';
+      lbl.textContent = L('调用参数', 'Arguments');
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const code = document.createElement('code');
+      code.innerHTML = highlightJson(argsRaw);
+      pre.append(code);
+      body.append(lbl, pre);
+    }
+
+    if (Array.isArray(mcp.result_texts) && mcp.result_texts.length) {
+      const lbl = document.createElement('div');
+      lbl.className = 'mcp-label';
+      lbl.textContent = L('文本结果', 'Result Text');
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      pre.textContent = mcp.result_texts.join('\n');
+      body.append(lbl, pre);
+    }
+
+    if (!body.children.length) return card;
+    card.append(body);
+    return card;
+  }
+
+  function makeSectionHead(titleText) {
+    const head = document.createElement('div');
+    head.className = 'audit-sec-head';
+    const h4 = document.createElement('h4');
+    h4.textContent = titleText;
+    head.append(h4);
+    return head;
+  }
+
+  function makeDetailsBlock(title, contentEl, open) {
+    if (!contentEl) return null;
+    const det = document.createElement('details');
+    det.className = 'audit-raw';
+    if (open) det.open = true;
+    const sum = document.createElement('summary');
+    const label = document.createElement('span');
+    label.textContent = title;
+    sum.append(label);
+    det.append(sum, contentEl);
+    return det;
+  }
+
+  window.loadAudits = async function() {
+    const p = new URLSearchParams({ limit: audPageSize() });
+    const add = (k, v) => { if (v !== '' && v != null) p.set(k, v); };
+    add('status', document.getElementById('audStatus')?.value || '');
+    add('model', document.getElementById('audModel')?.value || '');
+    add('issue', document.getElementById('audIssue')?.value || '');
+    add('account', document.getElementById('audAccount')?.value || '');
+    add('finish', document.getElementById('audFinish')?.value || '');
+    if (document.getElementById('audTools')?.checked) p.set('tools', '1');
+    add('path', (document.getElementById('audPath')?.value || '').trim());
+    add('q', (document.getElementById('audQ')?.value || '').trim());
+    add('since', audTime('audSince'));
+    add('until', audTime('audUntil'));
+    if (aud.cursor && aud.dir) p.set(aud.dir, aud.cursor);
+    if (!aud.models) p.set('models', '1');
+    const seq = ++aud.busy;
+    const data = await api('api/audits?' + p.toString());
+    if (seq !== aud.busy) return;
+    const tbody = document.querySelector('#audTable tbody');
+    if (!tbody) return;
+    const items = data.items || [];
+    aud.items = items;
+    aud.first = items.length ? items[0].id : null;
+    aud.last = items.length ? items[items.length - 1].id : null;
+    aud.hasOlder = !!data.has_older;
+    aud.hasNewer = !!data.has_newer;
+    const okRow = (r) => r.status >= 200 && r.status < 300 && !r.error;
+    const rows = new Array(items.length);
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i];
+      const mediaBadges = renderMediaSummaryBadges(r.media_summary);
+      rows[i] = `<tr data-id="${r.id}">
+        <td class="nw muted">${fmt.ts(r.ts)}</td>
+        <td class="nw truncate" title="${escapeHtml(r.client_ip)}">${escapeHtml(r.client_ip)}</td>
+        <td class="truncate" title="${escapeHtml(r.model)}">${escapeHtml(r.model || '-')}</td>
+        <td class="nw truncate">${upstreamCell(r.model, r.served_model)}${r.account ? '<div class="muted" style="font-size:11px">' + escapeHtml(r.account) + (r.attempts > 1 ? ' · ' + t('重试') + ' ' + (r.attempts - 1) : '') + '</div>' : ''}</td>
+        <td class="nw"><span class="badge ${okRow(r) ? 'ok' : 'fail'}">${r.status}</span>${issueTag(r.issue)}</td>
+        <td class="num nw">${fmt.ms(r.first_data_ms || r.ttfb_ms)}</td>
+        <td class="num nw">${fmt.ms(r.total_ms)}</td>
+        <td class="num nw">${r.pings || ''}</td>
+        <td class="num nw" title="${tokTitle(r)}">${(r.prompt_tokens || r.output_tokens) ? fmt.num(r.prompt_tokens) + ' / ' + fmt.num(r.output_tokens) : '-'}</td>
+        <td><span class="pre">${escapeHtml(r.method)} ${escapeHtml(r.path)}${r.stream ? ' <span class="badge muted">stream</span>' : ''}${r.finish_reason ? ' <span class="badge muted">' + escapeHtml(r.finish_reason) + '</span>' : ''}${r.tool_call_count ? ' <span class="badge warn">' + r.tool_call_count + ' tool</span>' : ''}${mediaBadges}</span>
+          ${r.params_summary ? '<div class="muted" style="font-size:11px;margin-top:2px">' + escapeHtml(r.params_summary) + '</div>' : ''}
+          ${r.request_preview ? '<div class="clamp2 muted" style="margin-top:3px">› ' + escapeHtml(r.request_preview) + '</div>' : ''}
+          ${r.reply_preview ? '<div class="clamp2" style="margin-top:2px">‹ ' + escapeHtml(r.reply_preview) + '</div>' : ''}
+          ${r.error ? '<div class="pre clamp2" style="color:var(--fail);margin-top:4px"><b>' + t('错误：') + '</b>' + escapeHtml(r.error) + '</div>' : ''}
+        </td></tr>`;
+    }
+    tbody.innerHTML = rows.join('') || `<tr><td colspan="10" class="empty">${t('还没有审计记录')}</td></tr>`;
+    const total = data.total || 0;
+    const totalTxt = (data.total_capped ? '>' : '') + fmt.num(Math.min(total, 10000));
+    const info = document.getElementById('audInfo');
+    if (info) info.textContent = (LANG === 'en'
+      ? `Model API calls only · ${totalTxt} matching · kept ${data.retention_days} days · ${(data.size_bytes / 1048576).toFixed(1)} MB · query ${data.query_ms}ms · click a row for full request/reply`
+      : `仅记录模型调用 · 匹配 ${totalTxt} 条 · 保留 ${data.retention_days} 天 · 占用 ${(data.size_bytes / 1048576).toFixed(1)} MB · 查询 ${data.query_ms}ms · 点击行查看完整请求与回复`);
+    document.getElementById('audPager').innerHTML = `
+      <span class="muted">${items.length ? '#' + aud.first + ' – #' + aud.last : ''}</span>
+      <span class="pager-btns">
+        <button class="btn muted" ${aud.hasNewer ? '' : 'disabled'} onclick="audPage('latest')">${t('最新')}</button>
+        <button class="btn muted" ${aud.hasNewer ? '' : 'disabled'} onclick="audPage('newer')">${t('上一页')}</button>
+        <button class="btn muted" ${aud.hasOlder ? '' : 'disabled'} onclick="audPage('older')">${t('下一页')}</button>
+      </span>`;
+    if (LANG === 'en') translateTree(tbody, true);
+    const sel = document.getElementById('audModel');
+    if (sel && data.models && !aud.models) {
+      aud.models = true;
+      const opts = (arr) => (arr || []).map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+      sel.insertAdjacentHTML('beforeend', opts(data.models));
+      document.getElementById('audAccount')?.insertAdjacentHTML('beforeend', opts(data.accounts));
+      document.getElementById('audFinish')?.insertAdjacentHTML('beforeend', opts(data.finish_reasons));
+      (data.issues || []).forEach(i => { ISSUE_LABEL[i.id] = i.label; });
+      document.getElementById('audIssue')?.insertAdjacentHTML('beforeend',
+        (data.issues || []).map(i => `<option value="${i.id}">${escapeHtml(t(i.label))}</option>`).join(''));
+    }
+  };
+
+  window.openAudit = async function(id) {
+    const r = await api('api/audits/' + id);
+    if (r.error && !r.id) { alert(r.error); return; }
+    const ov = document.createElement('div');
+    ov.className = 'audit-detail';
+    const m = (k, v, cls) => (v === '' || v == null) ? '' : `<div${cls ? ' class="' + cls + '"' : ''}><b>${t(k)}</b>${escapeHtml(String(v))}</div>`;
+    const streamMs = r.stream && r.first_data_ms ? r.total_ms - r.first_data_ms : null;
+
+    let calls = [];
+    try { calls = r.tool_calls ? JSON.parse(r.tool_calls) : []; } catch (e) {}
+
+    ov.innerHTML = `<div class="box">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0">#${r.id} · ${escapeHtml(r.method)} ${escapeHtml(r.path)} ${r.issue && r.issue !== 'ok' ? issueTag(r.issue) : '<span class="badge ok">' + t('正常') + '</span>'}${renderMediaSummaryBadges(r.media_summary)}</h3>
+        <span style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn muted" data-copy>${t('复制回复')}</button>
+          <button class="btn muted" data-dl>${t('导出 JSON')}</button>
+          <button class="btn muted" data-close>${t('关闭')}</button>
+        </span>
+      </div>
+      <div class="meta">
+        ${m('时间', fmt.ts(r.ts))}${m('IP', r.client_ip)}${m('状态', r.status)}${m('结束原因', r.finish_reason)}
+        ${m('模型', r.model)}${m('实际模型', r.served_model)}${m('账号', r.account)}${m('出口', r.proxy || (r.account ? t('直连') : ''))}
+        ${m('流式', r.stream ? 'yes' : 'no')}${m('上游尝试', r.attempts ? r.attempts + (r.attempts > 1 ? ' (' + t('重试') + ' ' + (r.attempts - 1) + ')' : '') : '')}
+        ${m('响应 id', r.resp_id)}${m('key 指纹', r.key_fp)}
+        ${m('响应头', fmt.ms(r.ttfb_ms))}${m('首字', fmt.ms(r.first_data_ms))}${m('总用时', fmt.ms(r.total_ms))}
+        ${m('流式输出时长', streamMs != null ? fmt.ms(streamMs) : '')}
+        ${m('上游首包', r.upstream_ttfb_ms ? fmt.ms(r.upstream_ttfb_ms) : '')}${m('上游总耗时', r.upstream_ms ? fmt.ms(r.upstream_ms) : '')}
+        ${m('保活', r.pings ? r.pings + ' (' + fmt.ms(r.first_data_ms) + ' ' + t('等待') + ')' : '0')}${m('数据块', r.chunks)}
+        ${m('输入 tokens', r.prompt_tokens)}${m('输出 tokens', r.output_tokens)}
+        ${m('缓存 tokens', r.cached_tokens || '')}${m('思考 tokens', r.reasoning_tokens || '')}${m('总 tokens', r.total_tokens || '')}
+        ${m('原始响应', fmt.num(r.raw_bytes) + ' B' + (r.raw_truncated ? ' (' + t('截断') + ')' : ''))}${m('Content-Type', r.content_type)}
+        ${m('UA', r.user_agent)}
+      </div>
+      ${r.params_summary ? '<div class="muted" style="margin:-4px 0 10px;font-size:12.5px">' + escapeHtml(r.params_summary) + '</div>' : ''}
+      ${r.error ? '<div class="audit-pre" style="color:var(--fail)">' + escapeHtml(r.error) + '</div>' : ''}
+      <div data-body></div>
+    </div>`;
+
+    const body = ov.querySelector('[data-body]');
+
+    // Response / Reply section
+    body.append(makeSectionHead(t('回复')));
+    const mcpCard = renderMcpCard(r.mcp_info);
+    if (mcpCard) body.append(mcpCard);
+    const resGallery = renderMediaGallery(r.res_media);
+    if (resGallery) body.append(resGallery);
+    const resBlocksEl = renderBlocks(r.response_blocks);
+    if (resBlocksEl) {
+      body.append(resBlocksEl);
+    } else if (r.reply) {
+      const pre = document.createElement('div');
+      pre.className = 'audit-pre';
+      pre.textContent = r.reply;
+      body.append(pre);
+    } else if (!resGallery && !mcpCard) {
+      const pre = document.createElement('div');
+      pre.className = 'audit-pre';
+      const emptySpan = document.createElement('span');
+      emptySpan.className = 'muted';
+      emptySpan.textContent = t('（无文字回复）');
+      pre.append(emptySpan);
+      body.append(pre);
+    }
+
+    // Request section
+    const reqGallery = renderMediaGallery(r.req_media);
+    const reqBlocksEl = renderBlocks(r.request_blocks);
+    if (reqGallery || reqBlocksEl) {
+      body.append(makeSectionHead(L('请求', 'Request')));
+      if (reqGallery) body.append(reqGallery);
+      if (reqBlocksEl) body.append(reqBlocksEl);
+    }
+
+    // Tool calls (legacy summary field)
+    if (calls.length) {
+      const callsDiv = document.createElement('div');
+      callsDiv.className = 'audit-pre';
+      callsDiv.innerHTML = calls.map(c =>
+        `<b>${escapeHtml(c.name || '?')}</b>${c.id ? ' <span class="muted">' + escapeHtml(c.id) + '</span>' : ''}\n${highlightJson(c.arguments)}`
+      ).join('\n\n');
+      body.append(makeDetailsBlock(t('工具调用'), callsDiv, true));
+    }
+
+    // Reasoning
+    if (r.reasoning) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const c = clipText(r.reasoning, MAX_DISPLAY_CHARS);
+      pre.textContent = c.clipped ? c.text + '\n... [clipped]' : c.text;
+      body.append(makeDetailsBlock(t('思考过程'), pre, false));
+    }
+
+    // System prompt
+    if (r.system_prompt) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const c = clipText(r.system_prompt, MAX_DISPLAY_CHARS);
+      pre.textContent = c.clipped ? c.text + '\n... [clipped]' : c.text;
+      body.append(makeDetailsBlock(t('System prompt'), pre, false));
+    }
+
+    // Request params
+    if (r.params) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const code = document.createElement('code');
+      code.innerHTML = highlightJson(r.params);
+      pre.append(code);
+      body.append(makeDetailsBlock(t('请求参数'), pre, false));
+    }
+
+    // Request body (Base64-sanitized)
+    if (r.request_body) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const code = document.createElement('code');
+      code.innerHTML = highlightJson(r.request_body);
+      pre.append(code);
+      body.append(makeDetailsBlock(t('请求体') + (r.raw_has_redacted_b64 ? L('（已脱敏 Base64）', ' (Base64 redacted)') : ''), pre, false));
+    }
+
+    // Headers
+    if (r.req_headers) {
+      const div = document.createElement('div');
+      div.className = 'audit-pre';
+      div.innerHTML = headersTable(r.req_headers);
+      body.append(makeDetailsBlock(t('请求头（原样，含凭据）'), div, false));
+    }
+    if (r.res_headers) {
+      const div = document.createElement('div');
+      div.className = 'audit-pre';
+      div.innerHTML = headersTable(r.res_headers);
+      body.append(makeDetailsBlock(t('响应头'), div, false));
+    }
+
+    // Raw response (Base64-sanitized)
+    if (r.raw) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-box';
+      const trimmed = r.raw.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        const code = document.createElement('code');
+        code.innerHTML = highlightJson(r.raw);
+        pre.append(code);
+      } else {
+        const c = clipText(r.raw, MAX_DISPLAY_CHARS);
+        pre.textContent = c.clipped ? c.text + '\n... [clipped]' : c.text;
+      }
+      body.append(makeDetailsBlock(t('原始响应（已去掉保活）') + (r.raw_has_redacted_b64 ? L('（已脱敏 Base64）', ' (Base64 redacted)') : ''), pre, false));
+    }
+
+    document.body.appendChild(ov);
+    if (LANG === 'en') translateTree(ov, true);
+    const close = () => { ov.remove(); document.removeEventListener('keydown', esc); };
+    const esc = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', esc);
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.querySelector('[data-close]').onclick = close;
+    ov.querySelector('[data-dl]').onclick = () => downloadJSON(`audit-${r.id}.json`, r);
+    ov.querySelector('[data-copy]').onclick = async () => {
+      const copyTxt = r.reply || (r.mcp_info && Array.isArray(r.mcp_info.result_texts) ? r.mcp_info.result_texts.join('\n') : '');
+      try { await navigator.clipboard.writeText(copyTxt); flash(t('已复制')); } catch (e) { flash(t('复制失败')); }
+    };
+  };
+})();
+</script>
+
 </body>
 </html>

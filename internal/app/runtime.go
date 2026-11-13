@@ -78,6 +78,8 @@ type RuntimeConfig struct {
 	// StreamKeepaliveSec 是流式请求连续空闲多少秒就发一次保活（#70），0 = 关（默认）。
 	// 开了之后慢请求会先开流，失败只能在流里报错、HTTP 状态码锁成 200，见 keepalive.go。
 	StreamKeepaliveSec int `json:"stream_keepalive_sec"`
+	// RefusalRetry retries short canned refusals on a fresh session for non-tool models.
+	RefusalRetry bool `json:"refusal_retry"`
 }
 
 const runtimeConfigKey = "runtime_config"
@@ -120,6 +122,7 @@ func initRuntimeConfig() {
 		StrictModel:            cfg.StrictModel,
 		StrictModelCooldownMin: cfg.StrictModelCooldownMin,
 		StreamKeepaliveSec:     cfg.StreamKeepaliveSec,
+		RefusalRetry:           true,
 	}
 	if raw := kvGet(runtimeConfigKey); raw != "" {
 		saved := base
