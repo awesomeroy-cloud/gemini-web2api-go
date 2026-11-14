@@ -541,19 +541,59 @@ func pollHistoryRaw(cid, cookie, sapisid, xsrf, proxyURL string, authuser int) (
 // 只登录态可用（匿名没有 XSRF、会话也没落到账号里）。best-effort：删失败只记日志，
 // 不影响已经返给客户端的响应。
 func deleteConversation(cid, cookie, sapisid, xsrf, proxyURL string, authuser int) {
+	deleteConversationWith(cid, cookie, sapisid, xsrf, proxyURL, authuser, getXSRF, uploadPost)
+}
+
+func deleteConversationWith(
+	cid, cookie, sapisid, xsrf, proxyURL string, authuser int,
+	getTok func(string, int, string) (string, error),
+	post func(string, map[string]string, []byte, string) (int, map[string]string, []byte, error),
+) {
+	if cid == "" || cookie == "" {
+		return
+	}
+	if xsrf == "" {
+		if getTok == nil {
+			logf("[autodel] 删会话 %s 取 XSRF 失败: %v", cid, fmt.Errorf("missing token getter"))
+			return
+		}
+		tok, err := getTok(cookie, authuser, proxyURL)
+		if err != nil || tok == "" {
+			if err == nil {
+				err = fmt.Errorf("empty token")
+			}
+			logf("[autodel] 删会话 %s 取 XSRF 失败: %v", cid, err)
+			return
+		}
+		xsrf = tok
+	}
+
 	inner, _ := json.Marshal([]interface{}{cid})
 	freq, _ := json.Marshal([]interface{}{[]interface{}{[]interface{}{"GzXR5e", string(inner), nil, "generic"}}})
-	form := url.Values{}
-	form.Set("f.req", string(freq))
-	form.Set("at", xsrf)
-	reqid := time.Now().UnixNano() % 1000000
-	endpoint := fmt.Sprintf(
-		"%s/_/BardChatUi/data/batchexecute?rpcids=GzXR5e&bl=%s&hl=en&_reqid=%d&rt=c", geminiBase(authuser),
-		currentBL(proxyURL), reqid)
-	headers := buildGeminiHeaders(cookie, sapisid, "")
-	setAuthUserHeaders(headers, authuser)
-	delete(headers, "x-goog-ext-525001261-jspb")
-	status, _, body, err := uploadPost(endpoint, headers, []byte(form.Encode()), proxyURL)
+	doPost := func(at string) (int, []byte, error) {
+		form := url.Values{}
+		form.Set("f.req", string(freq))
+		form.Set("at", at)
+		reqid := time.Now().UnixNano() % 1000000
+		endpoint := fmt.Sprintf(
+			"%s/_/BardChatUi/data/batchexecute?rpcids=GzXR5e&bl=%s&hl=en&_reqid=%d&rt=c",
+			geminiBase(authuser), currentBL(proxyURL), reqid)
+		headers := buildGeminiHeaders(cookie, sapisid, "")
+		setAuthUserHeaders(headers, authuser)
+		delete(headers, "x-goog-ext-525001261-jspb")
+		status, _, body, err := post(endpoint, headers, []byte(form.Encode()), proxyURL)
+		return status, body, err
+	}
+
+	status, body, err := doPost(xsrf)
+	if err == nil && status == 400 && isXSRFError(string(body)) {
+		invalidateXSRF(cookie)
+		if getTok != nil {
+			if tok, e := getTok(cookie, authuser, proxyURL); e == nil && tok != "" {
+				status, body, err = doPost(tok)
+			}
+		}
+	}
 	if err != nil {
 		logf("[autodel] 删会话 %s 失败: %v", cid, err)
 		return

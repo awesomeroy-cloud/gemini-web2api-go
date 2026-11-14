@@ -189,12 +189,10 @@ func anonFirstEligible(mc ModelConfig, hasAttachment bool) bool {
 
 // temporaryChatEligible 判断这次请求该不该走网页端原生「临时对话」（inner[45]=1，#34）。
 //
-// 与 multi_turn 冲突：临时对话不进会话列表，而 multi_turn 要按历史认出续接、靠服务端
-// 留着这串对话——两个一起开，续接那半就没了。所以 multi_turn 开着时一律不发 inner[45]，
-// 由 multi_turn 决定会话怎么留。调用点还会再要求有登录 cookie：匿名本来就不落账号，
-// 发 inner[45] 是没验过的无谓偏离。
+// 临时对话不进账号会话列表也不入训练，同时服务端仍支持在对话内多轮续接，可与 multi_turn 共用。
+// 调用点还会再要求有登录 cookie：匿名本来就不落账号，发 inner[45] 是没验过的无谓偏离。
 func temporaryChatEligible() bool {
-	return rtCfg().TemporaryChat && !rtCfg().MultiTurn
+	return rtCfg().TemporaryChat
 }
 
 // availableModels 返回当前配置下值得暴露的模型。
@@ -672,8 +670,7 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 	// 匿名两个值都能通，但没有理由继续偏离浏览器。
 	inner[41] = []interface{}{1}
 	// 临时对话（#34）：inner[45]=1 让这条不进账号的会话列表、不入训练。只在有登录
-	// cookie 时发——匿名本就不落账号，发了也没意义且没验过。multi_turn 开着时
-	// temporaryChatEligible 直接为假（两者冲突，见那里）。
+	// cookie 时发——匿名本就不落账号，发了也没意义且没验过。
 	if temporaryChatEligible() && cookieStr != "" {
 		inner[45] = 1
 	}
@@ -838,6 +835,7 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 				xsrfRetried = true
 				invalidateXSRF(cookieStr)
 				if tok, e := getXSRF(cookieStr, authUser, proxyURL); e == nil {
+					xsrfToken = tok
 					body = buildBody(tok)
 					geminiHeaders = buildGeminiHeaders(cookieStr, sapisid, mc.HexID)
 					setAuthUserHeaders(geminiHeaders, authUser)

@@ -26,6 +26,7 @@ type convState struct {
 	cookie                string // 会话绑定 cookie：登录号的 cookie，或匿名 /app 拿的 session
 	sapisid               string // 登录态算 SAPISIDHASH 用；匿名为空
 	isLogin               bool
+	temp                  bool   // 首轮即走网页端原生临时对话（inner[45]=1），不进账号会话列表
 	accountID             int64
 	authuser              int // 登录号的账号序号（/u/N）；整条会话不变，匿名为 0
 	proxyID               int64
@@ -44,14 +45,33 @@ var (
 	convStore = map[string]*convState{}
 )
 
+// shouldAutoDeleteConv 判断已离开 convStore 的多轮会话是否需要异步删掉服务端记录。
+func shouldAutoDeleteConv(st *convState) bool {
+	return st != nil && st.isLogin && !st.temp && st.cid != "" && st.cookie != "" && rtCfg().AutoDeleteConversation
+}
+
+func autoDeleteConvs(states ...*convState) {
+	for _, st := range states {
+		if shouldAutoDeleteConv(st) {
+			go deleteConversation(st.cid, st.cookie, st.sapisid, "", st.proxyURL, st.authuser)
+		}
+	}
+}
+
 // convDelete 作废一路会话（续接失败时用，避免客户端重试还撞同一路死会话）。
 func convDelete(key string) {
 	if key == "" {
 		return
 	}
 	convMu.Lock()
-	delete(convStore, key)
+	st, ok := convStore[key]
+	if ok {
+		delete(convStore, key)
+	}
 	convMu.Unlock()
+	if ok {
+		autoDeleteConvs(st)
+	}
 }
 
 // convGet 取一路会话，顺带清掉过期的。
@@ -60,34 +80,38 @@ func convGet(key string) *convState {
 		return nil
 	}
 	convMu.Lock()
-	defer convMu.Unlock()
 	st, ok := convStore[key]
 	if !ok {
+		convMu.Unlock()
 		return nil
 	}
 	if time.Since(st.updated) > convTTL {
 		delete(convStore, key)
+		convMu.Unlock()
+		autoDeleteConvs(st)
 		return nil
 	}
+	convMu.Unlock()
 	return st
 }
 
 // convPut 存一路会话，超量就按最旧的淘汰一批。
 func convPut(key string, st *convState) {
-	if key == "" {
+	if key == "" || st == nil {
 		return
 	}
+	var evicted []*convState
 	convMu.Lock()
-	defer convMu.Unlock()
 	st.updated = time.Now()
 	convStore[key] = st
 	if len(convStore) > convMax {
-		// 简单淘汰：删掉过期的；还超就删最旧的一小批。
+		// 简单淘汰：删掉过期的；还超就删最旧的一条。
 		var oldestK string
 		var oldestT time.Time
 		first := true
 		for k, v := range convStore {
 			if time.Since(v.updated) > convTTL {
+				evicted = append(evicted, v)
 				delete(convStore, k)
 				continue
 			}
@@ -96,9 +120,12 @@ func convPut(key string, st *convState) {
 			}
 		}
 		if len(convStore) > convMax && oldestK != "" {
+			evicted = append(evicted, convStore[oldestK])
 			delete(convStore, oldestK)
 		}
 	}
+	convMu.Unlock()
+	autoDeleteConvs(evicted...)
 }
 
 // canonicalMessages 把消息列表压成 role+text 的稳定串，用来算会话指纹。
@@ -243,6 +270,49 @@ func getAnonSession(proxyURL string) (string, error) {
 const webUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 
+// buildConvInner 构造多轮会话 StreamGenerate 的 inner 数组，tempChat 为真时写入 inner[45]=1。
+func buildConvInner(prompt string, mc ModelConfig, conv *convState, tempChat bool) []interface{} {
+	inner := make([]interface{}, innerSlots)
+	inner[0] = []interface{}{prompt, 0, nil, nil, nil, nil, 0}
+	inner[1] = []interface{}{"en"}
+	turn := 0
+	if conv != nil {
+		turn = conv.turn
+	}
+	if turn == 0 {
+		inner[2] = []interface{}{"", "", "", nil, nil, nil, nil, nil, nil, ""}
+	} else {
+		// 续接：[cid, rid, rcid(登录)/""(匿名), null×6, tok26]
+		inner[2] = []interface{}{conv.cid, conv.rid, conv.rcid,
+			nil, nil, nil, nil, nil, nil, conv.tok26}
+	}
+	inner[6] = []interface{}{0}
+	inner[7] = 1
+	inner[10] = 1
+	inner[11] = 0
+	inner[17] = []interface{}{[]interface{}{turn}}
+	inner[18] = 0
+	inner[27] = 1
+	inner[30] = []interface{}{4}
+	inner[41] = []interface{}{1}
+	if tempChat {
+		inner[45] = 1
+	}
+	inner[53] = 0
+	inner[59] = uuid.NewString()
+	inner[61] = []interface{}{}
+	inner[68] = 1
+	inner[79] = mc.Mode
+	tw := mc.thinkWire()
+	inner[80] = tw
+	inner[91] = 0
+	inner[96] = 0
+	if tw != thinkingNormal {
+		inner[96] = 1
+	}
+	return inner
+}
+
 // streamGenerateConv 发一路会话的一轮。turn==0 是首轮（建会话），>0 是续接（只发新消息）。
 // 整条会话绑定 conv.cookie / conv.proxyID，中途不换号不换出口。成功后回填 conv 的
 // cid/rid/rcid/tok26 和 turn+1，供下一轮续接。
@@ -282,38 +352,13 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		}
 	}
 
-	inner := make([]interface{}, innerSlots)
-	inner[0] = []interface{}{prompt, 0, nil, nil, nil, nil, 0}
-	inner[1] = []interface{}{"en"}
+	wantTemp := (temporaryChatEligible() || rtCfg().AutoDeleteConversation) && conv.isLogin && conv.cookie != ""
 	if conv.turn == 0 {
-		inner[2] = []interface{}{"", "", "", nil, nil, nil, nil, nil, nil, ""}
-	} else {
-		// 续接：[cid, rid, rcid(登录)/""(匿名), null×6, tok26]
-		inner[2] = []interface{}{conv.cid, conv.rid, conv.rcid,
-			nil, nil, nil, nil, nil, nil, conv.tok26}
+		conv.temp = wantTemp
 	}
-	inner[6] = []interface{}{0}
-	inner[7] = 1
-	inner[10] = 1
-	inner[11] = 0
-	inner[17] = []interface{}{[]interface{}{conv.turn}}
-	inner[18] = 0
-	inner[27] = 1
-	inner[30] = []interface{}{4}
-	inner[41] = []interface{}{1}
-	inner[53] = 0
-	reqUUID := uuid.NewString()
-	inner[59] = reqUUID
-	inner[61] = []interface{}{}
-	inner[68] = 1
-	inner[79] = mc.Mode
-	tw := mc.thinkWire()
-	inner[80] = tw
-	inner[91] = 0
-	inner[96] = 0
-	if tw != thinkingNormal {
-		inner[96] = 1
-	}
+	useTemp := conv.temp || wantTemp
+	inner := buildConvInner(prompt, mc, conv, useTemp)
+	reqUUID, _ := inner[59].(string)
 
 	innerJSON, _ := json.Marshal(inner)
 	outerJSON, _ := json.Marshal([]interface{}{nil, string(innerJSON)})

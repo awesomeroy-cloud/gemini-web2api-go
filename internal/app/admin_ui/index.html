@@ -1247,7 +1247,7 @@ const RT_GROUPS = [
     title: '会话与账号',
     fields: [
       { k: 'auto_delete_conversation', label: '自动删网页会话', type: 'bool',
-        hint: '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应。开了「临时对话」时不需要（会话本就不进列表）；走「服务端多轮续接」的请求不删（续接要靠这条会话），要它们也不进列表请开「临时对话」' },
+        hint: '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应。开了「临时对话」时不需要（会话本就不进列表）；同时开「服务端多轮续接」时也生效：多轮会话改走临时模式以保留多轮续接且不进列表，既有非临时会话也会在过期或淘汰时清理删除' },
       { k: 'temporary_chat', label: '临时对话', type: 'bool',
         hint: '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义。开了「服务端多轮续接」也生效：临时对话本身能多轮续聊，只是不进列表' },
       { k: 'multi_turn', label: '服务端多轮续接', type: 'bool',
@@ -2616,11 +2616,11 @@ const I18N_EN = {
   'Key 至少 20 字符': 'Key must be at least 20 characters',
   'Key 已更新': 'Key updated',
   '自动删网页会话': 'Auto-delete web chat',
-  '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应':
-    'Automatically deletes the conversation on gemini.google.com after completion to prevent account clutter. Logged-in only, asynchronous best-effort; deletion failure does not affect the response',
+  '出完结果自动删掉 gemini.google.com 上留下的这条会话，免得登录号里堆一堆。只登录态生效，异步 best-effort，删失败不影响响应。开了「临时对话」时不需要（会话本就不进列表）；同时开「服务端多轮续接」时也生效：多轮会话改走临时模式以保留多轮续接且不进列表，既有非临时会话也会在过期或淘汰时清理删除':
+    'Automatically deletes the conversation on gemini.google.com after completion to prevent account clutter. Logged-in only, asynchronous best-effort; deletion failure does not affect the response. Unnecessary when "Temporary chat" is enabled (sessions never enter the list); when "Server multi-turn resume" is also enabled, multi-turn sessions stay out of the web conversation list too (using temporary mode while preserving multi-turn continuation, plus cleanup of existing persistent sessions on expiry or eviction)',
   '临时对话': 'Temporary chat',
   '走网页端原生「临时对话」（inner[45]=1）：会话压根不进账号的会话列表、不用于训练，比「自动删网页会话」更干净，还省掉那次删除请求。只登录态有意义。开了「服务端多轮续接」也生效：临时对话本身能多轮续聊，只是不进列表':
-    'Uses web-native "Temporary Chat" (inner[45]=1): conversations never enter account history and are not used for training. Cleaner than auto-delete and eliminates the delete request. Effective only when logged in; inactive if "Server multi-turn resume" is enabled (temporary chat leaves no history, multi-turn requires server sessions)',
+    'Uses web-native "Temporary Chat" (inner[45]=1): conversations never enter account history and are not used for training. Cleaner than auto-delete and eliminates the delete request. Effective only when logged in. Also works when "Server multi-turn resume" is enabled: temporary chats still support multi-turn continuation without entering the list',
   '服务端多轮续接': 'Server multi-turn resume',
   '走 Gemini 原生服务端多轮：按历史前缀认出这是上一轮的续接，命中就只发最新一句、历史留在服务端，同一串对话复用同一个 gemini 会话（不再每发一条就新开一个）。匿名/登录都行，带图或带工具时不生效。首轮/重启/改历史会退回整段重发。默认关':
     'Uses Gemini native server-side multi-turn: recognizes prior context by history prefix, sending only the latest turn while upstream maintains history. Reuses the same Gemini session across conversation turns. Works for anonymous and logged-in; inactive with images or tools. Falls back to full replay on first turn, restart, or edited history. Default off',
