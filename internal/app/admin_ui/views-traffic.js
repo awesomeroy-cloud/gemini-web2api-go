@@ -93,6 +93,12 @@ function toEpochSec(datetimeLocalVal) {
     return "";
   return String(Math.floor(ms / 1000));
 }
+function summarizeBlockPreview(raw) {
+  const len = raw.length;
+  const singleLine = raw.replace(/\s+/g, " ").trim();
+  const preview = singleLine.length > 96 ? `${singleLine.slice(0, 96)}…` : singleLine;
+  return { preview, len };
+}
 function renderAuditBlockCard(block) {
   const bType = block.type || "text";
   const cls = bType === "thinking" ? "chat-block chat-block--thinking" : bType === "tool_call" || bType === "tool_result" ? "chat-block chat-block--tool" : "chat-block";
@@ -103,6 +109,14 @@ function renderAuditBlockCard(block) {
     metaNodes.push(el("span", { class: "mono" }, block.name));
   if (block.mime)
     metaNodes.push(el("span", { class: "mono" }, block.mime));
+  const rawPreviewSource = block.text || block.args || block.url || "";
+  if (rawPreviewSource) {
+    const { preview, len } = summarizeBlockPreview(rawPreviewSource);
+    if (preview)
+      metaNodes.push(el("span", { class: "chat-block__preview" }, preview));
+    if (len > 0)
+      metaNodes.push(el("span", { class: "chat-block__len" }, `${fmtNum(len)} chars`));
+  }
   const bodyNodes = [];
   if (block.url) {
     const src = normalizeMediaUrl(block.url);
@@ -139,7 +153,7 @@ function renderAuditBlockCard(block) {
   if (block.text) {
     bodyNodes.push(el("div", { class: "text-prewrap" }, block.text));
   }
-  return el("div", { class: cls }, el("div", { class: "chat-block__meta" }, ...metaNodes), ...bodyNodes);
+  return el("details", { class: cls }, el("summary", { class: "chat-block__summary" }, ...metaNodes), el("div", { class: "chat-block__body" }, ...bodyNodes));
 }
 function renderMediaCards(auditId, side, items) {
   if (!Array.isArray(items) || items.length === 0) {
@@ -712,8 +726,14 @@ export function mountTraffic(container, _ctx) {
         ]
       });
       const blocksBody = drawerTabs.panelBodies.blocks;
-      if (detail.system_prompt) {
-        blocksBody.append(el("h3", { class: "subhead" }, "System Prompt"), renderAuditBlockCard({ type: "text", role: "system", text: detail.system_prompt }));
+      blocksBody.append(el("h3", { class: "subhead" }, bi(`响应内容块 (${resBlocks.length})`, `Response Blocks (${resBlocks.length})`)));
+      if (resBlocks.length > 0) {
+        blocksBody.append(...resBlocks.map(renderAuditBlockCard));
+      } else {
+        blocksBody.append(uiEmptyState(bi("未提取到响应块", "No response blocks extracted")));
+      }
+      if (detail.reasoning) {
+        blocksBody.append(el("h3", { class: "subhead" }, bi("推理过程 (Reasoning)", "Reasoning")), renderAuditBlockCard({ type: "thinking", role: "assistant", text: detail.reasoning }));
       }
       blocksBody.append(el("h3", { class: "subhead" }, bi(`请求内容块 (${reqBlocks.length})`, `Request Blocks (${reqBlocks.length})`)));
       if (reqBlocks.length > 0) {
@@ -721,14 +741,8 @@ export function mountTraffic(container, _ctx) {
       } else {
         blocksBody.append(uiEmptyState(bi("未提取到请求块", "No request blocks extracted")));
       }
-      if (detail.reasoning) {
-        blocksBody.append(el("h3", { class: "subhead" }, bi("推理过程 (Reasoning)", "Reasoning")), renderAuditBlockCard({ type: "thinking", role: "assistant", text: detail.reasoning }));
-      }
-      blocksBody.append(el("h3", { class: "subhead" }, bi(`响应内容块 (${resBlocks.length})`, `Response Blocks (${resBlocks.length})`)));
-      if (resBlocks.length > 0) {
-        blocksBody.append(...resBlocks.map(renderAuditBlockCard));
-      } else {
-        blocksBody.append(uiEmptyState(bi("未提取到响应块", "No response blocks extracted")));
+      if (detail.system_prompt) {
+        blocksBody.append(el("h3", { class: "subhead" }, "System Prompt"), renderAuditBlockCard({ type: "text", role: "system", text: detail.system_prompt }));
       }
       drawerTabs.panelBodies.media.append(uiKeyValueGrid([
         { key: "req_count", value: String(mediaSum.req_count || 0) },
