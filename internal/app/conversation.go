@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +58,90 @@ func autoDeleteConvs(states ...*convState) {
 			go deleteConversation(st.cid, st.cookie, st.sapisid, "", st.proxyURL, st.authuser)
 		}
 	}
+}
+
+// ConvSessionView exposes active multi-turn conversation state to the admin inspector.
+type ConvSessionView struct {
+	Key       string `json:"key"`
+	CID       string `json:"cid"`
+	RID       string `json:"rid"`
+	RCID      string `json:"rcid"`
+	Turn      int    `json:"turn"`
+	IsLogin   bool   `json:"is_login"`
+	Temp      bool   `json:"temp"`
+	AccountID int64  `json:"account_id"`
+	AuthUser  string `json:"authuser"`
+	ProxyID   int64  `json:"proxy_id"`
+	UpdatedAt int64  `json:"updated_at"`
+	TTLSec    int64  `json:"ttl_sec"`
+}
+
+// convList returns non-expired active multi-turn sessions ordered by UpdatedAt descending.
+func convList() []ConvSessionView {
+	now := time.Now()
+	var expired []*convState
+	out := make([]ConvSessionView, 0)
+	convMu.Lock()
+	for k, st := range convStore {
+		age := now.Sub(st.updated)
+		if age > convTTL {
+			expired = append(expired, st)
+			delete(convStore, k)
+			continue
+		}
+		rem := int64((convTTL - age).Seconds())
+		if rem < 0 {
+			rem = 0
+		}
+		out = append(out, ConvSessionView{
+			Key:       k,
+			CID:       st.cid,
+			RID:       st.rid,
+			RCID:      st.rcid,
+			Turn:      st.turn,
+			IsLogin:   st.isLogin,
+			Temp:      st.temp,
+			AccountID: st.accountID,
+			AuthUser:  strconv.Itoa(st.authuser),
+			ProxyID:   st.proxyID,
+			UpdatedAt: st.updated.Unix(),
+			TTLSec:    rem,
+		})
+	}
+	convMu.Unlock()
+	if len(expired) > 0 {
+		autoDeleteConvs(expired...)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt != out[j].UpdatedAt {
+			return out[i].UpdatedAt > out[j].UpdatedAt
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
+}
+
+// convDeleteAdmin evicts one session by key, or clears all sessions when key is empty.
+func convDeleteAdmin(key string) int {
+	var evicted []*convState
+	removed := 0
+	convMu.Lock()
+	if key == "" {
+		removed = len(convStore)
+		for k, st := range convStore {
+			evicted = append(evicted, st)
+			delete(convStore, k)
+		}
+	} else if st, ok := convStore[key]; ok {
+		removed = 1
+		evicted = append(evicted, st)
+		delete(convStore, key)
+	}
+	convMu.Unlock()
+	if len(evicted) > 0 {
+		autoDeleteConvs(evicted...)
+	}
+	return removed
 }
 
 // convDelete 作废一路会话（续接失败时用，避免客户端重试还撞同一路死会话）。

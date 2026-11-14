@@ -4,6 +4,8 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	pathpkg "path"
+	"strings"
 )
 
 //go:embed admin_ui/*
@@ -42,13 +44,17 @@ func handleAdminUI(w http.ResponseWriter, r *http.Request) {
 	stat, _ := f.Stat()
 	data := make([]byte, stat.Size())
 	f.Read(data)
-	switch {
-	case len(path) > 5 && path[len(path)-5:] == ".html":
+	switch strings.ToLower(pathpkg.Ext(path)) {
+	case ".html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	case len(path) > 3 && path[len(path)-3:] == ".js":
-		w.Header().Set("Content-Type", "application/javascript")
-	case len(path) > 4 && path[len(path)-4:] == ".css":
-		w.Header().Set("Content-Type", "text/css")
+	case ".js", ".mjs":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	default:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}

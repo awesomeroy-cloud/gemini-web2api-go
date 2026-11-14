@@ -54,6 +54,7 @@ type AuditMetaItem struct {
 }
 
 func handleAdminAudits(w http.ResponseWriter, r *http.Request) {
+	t0 := time.Now()
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
@@ -67,11 +68,13 @@ func handleAdminAudits(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if q.Get("models") == "1" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"models":   auditDistinct(conn, "SELECT DISTINCT model FROM audit_meta WHERE model != '' ORDER BY model"),
-			"accounts": auditDistinct(conn, "SELECT DISTINCT account FROM audit_meta WHERE account != '' ORDER BY account"),
-			"issues":   auditDistinct(conn, "SELECT DISTINCT issue FROM audit_meta WHERE issue != '' ORDER BY issue"),
-			"finishes": auditDistinct(conn, "SELECT DISTINCT finish_reason FROM audit_meta WHERE finish_reason != '' ORDER BY finish_reason"),
-			"paths":    auditDistinct(conn, "SELECT DISTINCT path FROM audit_meta WHERE path != '' ORDER BY path"),
+			"models":         auditDistinct(conn, "SELECT DISTINCT model FROM audit_meta WHERE model != '' ORDER BY model"),
+			"accounts":       auditDistinct(conn, "SELECT DISTINCT account FROM audit_meta WHERE account != '' ORDER BY account"),
+			"issues":         auditDistinct(conn, "SELECT DISTINCT issue FROM audit_meta WHERE issue != '' ORDER BY issue"),
+			"finishes":       auditDistinct(conn, "SELECT DISTINCT finish_reason FROM audit_meta WHERE finish_reason != '' ORDER BY finish_reason"),
+			"paths":          auditDistinct(conn, "SELECT DISTINCT path FROM audit_meta WHERE path != '' ORDER BY path"),
+			"retention_days": rtCfg().RetentionDays,
+			"size_bytes":     auditDataBytes(),
 		})
 		return
 	}
@@ -256,6 +259,11 @@ func handleAdminAudits(w http.ResponseWriter, r *http.Request) {
 		"has_more":       hasMore,
 		"next_before_id": nextBeforeID,
 		"total":          total,
+		"has_older":      hasMore,
+		"has_newer":      beforeID > 0 || afterID > 0,
+		"query_ms":       time.Since(t0).Milliseconds(),
+		"retention_days": rtCfg().RetentionDays,
+		"size_bytes":     auditDataBytes(),
 	})
 }
 
@@ -536,14 +544,23 @@ func serveAuditMedia(w http.ResponseWriter, r *http.Request, id int64, side, idx
 }
 
 func handleAdminConversations(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		items := convList()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items": items,
+			"total": len(items),
+		})
+	case http.MethodDelete:
+		key := strings.TrimSpace(r.URL.Query().Get("key"))
+		deleted := convDeleteAdmin(key)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"deleted": deleted,
+		})
+	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": []any{},
-		"total": 0,
-	})
 }
 
 var _ = fmt.Sprintf

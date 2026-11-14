@@ -145,12 +145,50 @@ func TestAuditMiddlewareAndAdminEndpoints(t *testing.T) {
 		t.Fatalf("unexpected range bytes: %v", wMedia.Body.Bytes())
 	}
 
-	// 6. Test /admin/api/conversations
+	// 6. Test /admin/api/conversations GET + DELETE
+	convPut("sess-test-1", &convState{cid: "c_1", rid: "r_1", rcid: "rc_1", turn: 2, isLogin: false, temp: true, accountID: 0, authuser: 0, proxyID: 0})
+	convPut("sess-test-2", &convState{cid: "c_2", rid: "r_2", rcid: "rc_2", turn: 1, isLogin: false, temp: true, accountID: 0, authuser: 0, proxyID: 0})
 	rConv := httptest.NewRequest(http.MethodGet, "/admin/api/conversations", nil)
 	wConv := httptest.NewRecorder()
 	handleAdminConversations(wConv, rConv)
 	if wConv.Code != http.StatusOK {
 		t.Fatalf("conversations status=%d", wConv.Code)
+	}
+	var convListResp struct {
+		Items []ConvSessionView `json:"items"`
+		Total int               `json:"total"`
+	}
+	if err := json.Unmarshal(wConv.Body.Bytes(), &convListResp); err != nil {
+		t.Fatalf("unmarshal conversations: %v", err)
+	}
+	if convListResp.Total < 2 || len(convListResp.Items) < 2 {
+		t.Fatalf("expected >=2 active conversations, got total=%d items=%d", convListResp.Total, len(convListResp.Items))
+	}
+
+	rConvDelOne := httptest.NewRequest(http.MethodDelete, "/admin/api/conversations?key=sess-test-1", nil)
+	wConvDelOne := httptest.NewRecorder()
+	handleAdminConversations(wConvDelOne, rConvDelOne)
+	if wConvDelOne.Code != http.StatusOK {
+		t.Fatalf("delete single conversation status=%d", wConvDelOne.Code)
+	}
+	var delResp struct {
+		OK      bool `json:"ok"`
+		Deleted int  `json:"deleted"`
+	}
+	_ = json.Unmarshal(wConvDelOne.Body.Bytes(), &delResp)
+	if !delResp.OK || delResp.Deleted != 1 {
+		t.Fatalf("expected ok=true deleted=1, got %+v", delResp)
+	}
+
+	rConvDelAll := httptest.NewRequest(http.MethodDelete, "/admin/api/conversations", nil)
+	wConvDelAll := httptest.NewRecorder()
+	handleAdminConversations(wConvDelAll, rConvDelAll)
+	if wConvDelAll.Code != http.StatusOK {
+		t.Fatalf("delete all conversations status=%d", wConvDelAll.Code)
+	}
+	_ = json.Unmarshal(wConvDelAll.Body.Bytes(), &delResp)
+	if !delResp.OK || delResp.Deleted < 1 {
+		t.Fatalf("expected ok=true deleted>=1, got %+v", delResp)
 	}
 
 	// 7. Regression: existing audit.db stores ts as REAL (e.g. 1794578832.987)
