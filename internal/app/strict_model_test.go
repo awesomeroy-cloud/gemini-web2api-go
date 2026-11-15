@@ -149,9 +149,9 @@ func TestModelDowngraded(t *testing.T) {
 	}{
 		{"gemini-3.1-pro", "3.1 Pro", false},
 		{"gemini-3.1-pro-thinking", "3.1 Pro High", false},
-		{"gemini-3.6-flash-thinking", "3.6 Flash 扩展", false},
+		{"gemini-3.6-flash-thinking", "4 Hydrogen High", false},
 		{"gemini-4-argon-thinking", "4 Argon High", false},
-		{"gemini-3.7-flash", "3.8 Flash", false},
+		{"gemini-3.7-flash", "4 Hydrogen", false},
 		// 2026-10-24 实测：无 Argon 权限的号请求 Argon，自报 3.5 Flash-Lite
 		{"gemini-4-argon", "3.5 Flash-Lite", true},
 		// 同日实测：免费号请求 3.8，自报 3.6 Flash
