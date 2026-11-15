@@ -791,6 +791,7 @@ export function mountTraffic(container, _ctx) {
       }
       rawBody.append(uiCodePanel({ title: "req_headers", text: prettyMaybeJSON(detail.req_headers), ariaLabel: "Request headers" }), uiCodePanel({ title: "res_headers", text: prettyMaybeJSON(detail.res_headers), ariaLabel: "Response headers" }), uiCodePanel({ title: "params", text: prettyMaybeJSON(detail.params), ariaLabel: "Request params" }), uiCodePanel({ title: "request_body", text: prettyMaybeJSON(detail.request_body), ariaLabel: "Request body" }), uiCodePanel({ title: "reply", text: detail.reply || "", ariaLabel: "Normalized reply" }), uiCodePanel({ title: "raw", text: detail.raw || "", ariaLabel: "Raw upstream response" }));
       dlgBody.replaceChildren(summaryGrid, ...errAlert ? [errAlert] : [], drawerTabs.tablist, ...drawerTabs.panelElements);
+      dlgBody.scrollTop = 0;
     } catch (err) {
       if (seq !== inspectSeq)
         return;

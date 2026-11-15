@@ -1074,6 +1074,7 @@ export function mountTraffic(container: HTMLElement, _ctx: ViewContext): ViewCon
         drawerTabs.tablist,
         ...drawerTabs.panelElements,
       );
+      dlgBody.scrollTop = 0;
     } catch (err) {
       if (seq !== inspectSeq) return;
       if (isApiError(err) && err.status === 401) {

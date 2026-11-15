@@ -311,18 +311,10 @@ export function setupTablist(tablistEl, panels, onSelect) {
       tab.tabIndex = active ? 0 : -1;
     }
     for (const [panelKey, panelEl] of Object.entries(panels)) {
-      const active = panelKey === key;
-      if (active) {
-        panelEl.removeAttribute("hidden");
-        panelEl.tabIndex = panelEl.querySelector("a,button,input,select,textarea") ? -1 : 0;
-      } else {
-        panelEl.setAttribute("hidden", "until-found");
-        panelEl.removeAttribute("tabindex");
-      }
+      panelEl.hidden = panelKey !== key;
     }
     if (moveFocus)
-      targetTab.focus();
-    targetTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      targetTab.focus({ preventScroll: true });
     if (onSelect)
       onSelect(key);
   };
@@ -340,15 +332,8 @@ export function setupTablist(tablistEl, panels, onSelect) {
         nextIdx = tabs.length - 1;
       if (nextIdx >= 0) {
         e.preventDefault();
-        tabs[nextIdx].focus();
+        selectTab(tabs[nextIdx], true);
       }
-    });
-  }
-  for (const [panelKey, panelEl] of Object.entries(panels)) {
-    panelEl.addEventListener("beforematch", () => {
-      const matchingTab = tabs.find((tb) => tb.dataset.tab === panelKey);
-      if (matchingTab)
-        selectTab(matchingTab, false);
     });
   }
   return {
@@ -382,7 +367,7 @@ export function uiTabs(opts) {
       role: "tabpanel",
       id: def.panelId,
       "aria-labelledby": def.id,
-      hidden: active ? false : "until-found"
+      hidden: !active
     }, body);
     panels[def.key] = panel;
     panelBodies[def.key] = body;
