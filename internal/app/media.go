@@ -147,9 +147,9 @@ func fetchMediaArtifacts(tool int, raw, cid, rid, cookie, sapisid, xsrf, proxyUR
 		arts, err := fetchImageArtifacts(raw, cid, cookie, sapisid, xsrf, proxyURL, defaultMime, authuser)
 		return arts, "", err
 	}
-	// 音乐几乎立刻就绪，视频要生成几十秒到几分钟，所以视频轮询给足预算。
+	// 音乐与视频均可能耗时数十秒到数分钟，轮询预算保持一致（拿到链接即提前返回）。
 	maxPolls, interval := 6, 2*time.Second
-	if tool == toolVideo {
+	if tool == toolVideo || tool == toolMusic {
 		maxPolls, interval = 45, 8*time.Second // 约 6 分钟
 	}
 	arts, rcid, err := fetchDownloadArtifacts(cid, rid, cookie, sapisid, xsrf, proxyURL, defaultMime, tool, maxPolls, interval, authuser)
