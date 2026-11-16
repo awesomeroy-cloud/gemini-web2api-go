@@ -302,9 +302,9 @@ func quickAuditMediaSummary(conn *sql.DB, id int64) *AuditMediaSummary {
 	if err != nil {
 		return nil
 	}
-	reqCount := strings.Count(reqBody, "data:image/") + strings.Count(reqBody, "data:audio/") + strings.Count(reqBody, "data:video/") +
+	reqCount := len(reDataURI.FindAllStringIndex(reqBody, -1)) +
 		strings.Count(reqBody, `"inlineData"`) + strings.Count(reqBody, `"inline_data"`) + strings.Count(reqBody, `"input_audio"`)
-	resCount := strings.Count(raw, "data:image/") + strings.Count(raw, "data:audio/") + strings.Count(raw, "data:video/") +
+	resCount := len(reDataURI.FindAllStringIndex(raw, -1)) +
 		strings.Count(raw, `"b64_json"`) + strings.Count(raw, `"type":"image"`) + strings.Count(raw, `"type": "image"`) +
 		strings.Count(raw, `"type":"audio"`) + strings.Count(raw, `"type": "audio"`) +
 		strings.Count(raw, `"inlineData"`) + strings.Count(raw, `"inline_data"`)
