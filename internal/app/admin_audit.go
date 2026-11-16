@@ -308,6 +308,9 @@ func quickAuditMediaSummary(conn *sql.DB, id int64) *AuditMediaSummary {
 		strings.Count(raw, `"b64_json"`) + strings.Count(raw, `"type":"image"`) + strings.Count(raw, `"type": "image"`) +
 		strings.Count(raw, `"type":"audio"`) + strings.Count(raw, `"type": "audio"`) +
 		strings.Count(raw, `"inlineData"`) + strings.Count(raw, `"inline_data"`)
+	if resCount == 0 {
+		resCount = len(loadCachedMediaItems(id, "res"))
+	}
 	if reqCount == 0 && resCount == 0 {
 		return nil
 	}

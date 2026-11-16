@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	auditRawCap        = 409600
-	auditReqBodyCap    = 16 << 20 // 16 MiB max request body capture
-	auditQueueSize     = 512
-	auditPreviewMaxRun = 200
+	auditRawCap          = 409600
+	auditMediaCaptureCap = 32 << 20 // 32 MiB max media capture for audit-media cache
+	auditReqBodyCap      = 16 << 20 // 16 MiB max request body capture
+	auditQueueSize       = 512
+	auditPreviewMaxRun   = 200
 )
 
 const auditSchema = `
@@ -154,6 +155,13 @@ type auditRecord struct {
 	Params       string
 	SystemPrompt string
 	ToolCalls    string
+
+	PendingMedia []pendingAuditMedia
+}
+
+type pendingAuditMedia struct {
+	ext  string
+	data []byte
 }
 
 func auditDir() string {
@@ -321,6 +329,14 @@ func insertAudit(rec *auditRecord) {
 	}
 	if err := tx.Commit(); err != nil {
 		logf("[audit] commit failed: %v", err)
+		return
+	}
+	for i, pm := range rec.PendingMedia {
+		if len(pm.data) > 0 {
+			if err := cacheAuditMediaFile(id, "res", i, pm.ext, pm.data); err != nil {
+				logf("[audit] cache media failed: %v", err)
+			}
+		}
 	}
 }
 
@@ -339,6 +355,8 @@ type auditWriter struct {
 	account     string
 	proxy       string
 	buf         bytes.Buffer
+	mediaBuf    bytes.Buffer
+	mediaCapHit bool
 }
 
 // auditSetAttribution records account and proxy attribution on the active auditWriter.
@@ -395,12 +413,46 @@ func (aw *auditWriter) Write(p []byte) (int, error) {
 		} else {
 			aw.buf.Write(p[:rem])
 			aw.truncated = true
+			aw.captureMediaOverflow(p[rem:])
 		}
 	} else if len(p) > 0 {
 		aw.truncated = true
+		aw.captureMediaOverflow(p)
 	}
 
 	return aw.w.Write(p)
+}
+
+func isBinaryMediaCT(ct string) bool {
+	low := strings.ToLower(strings.TrimSpace(ct))
+	return strings.HasPrefix(low, "video/") || strings.HasPrefix(low, "audio/") || strings.HasPrefix(low, "image/")
+}
+
+func (aw *auditWriter) captureMediaOverflow(extra []byte) {
+	if len(extra) == 0 || aw.mediaCapHit {
+		return
+	}
+	if aw.mediaBuf.Len() == 0 {
+		b := aw.buf.Bytes()
+		if !isBinaryMediaCT(aw.Header().Get("Content-Type")) &&
+			!bytes.Contains(b, []byte("data:image/")) &&
+			!bytes.Contains(b, []byte("data:audio/")) &&
+			!bytes.Contains(b, []byte("data:video/")) {
+			return
+		}
+	}
+	maxExtra := auditMediaCaptureCap - auditRawCap
+	rem := maxExtra - aw.mediaBuf.Len()
+	if rem <= 0 {
+		aw.mediaCapHit = true
+		return
+	}
+	if len(extra) <= rem {
+		aw.mediaBuf.Write(extra)
+	} else {
+		aw.mediaBuf.Write(extra[:rem])
+		aw.mediaCapHit = true
+	}
 }
 
 func (aw *auditWriter) Flush() {
@@ -568,7 +620,34 @@ func buildAuditRecord(r *http.Request, reqBody []byte, aw *auditWriter, startedA
 	}
 
 	parseAuditRequest(reqStr, rec)
-	parseAuditResponse(rawStr, ct, rec)
+	if isBinaryMediaCT(ct) && aw.status == http.StatusOK {
+		fullBytes := aw.buf.Bytes()
+		if aw.mediaBuf.Len() > 0 {
+			fullBytes = append(append([]byte(nil), fullBytes...), aw.mediaBuf.Bytes()...)
+		} else {
+			fullBytes = append([]byte(nil), fullBytes...)
+		}
+		if len(fullBytes) > 0 {
+			mime, ext := sniffMediaMIME(fullBytes, ct)
+			rec.PendingMedia = []pendingAuditMedia{{ext: ext, data: fullBytes}}
+			rec.Raw = fmt.Sprintf("[binary %s · %s]", mime, humanBytes(int64(len(fullBytes))))
+			rec.Reply = rec.Raw
+		}
+	} else if aw.mediaBuf.Len() > 0 {
+		fullStr := rawStr + aw.mediaBuf.String()
+		parseAuditResponse(fullStr, ct, rec)
+		for _, m := range reDataURI.FindAllStringSubmatch(fullStr, -1) {
+			if len(m) < 3 {
+				continue
+			}
+			if decoded, ok := decodeBase64Flexible(m[2]); ok {
+				_, ext := sniffMediaMIME(decoded, m[1])
+				rec.PendingMedia = append(rec.PendingMedia, pendingAuditMedia{ext: ext, data: decoded})
+			}
+		}
+	} else {
+		parseAuditResponse(rawStr, ct, rec)
+	}
 
 	if strings.Contains(strings.ToLower(ct), "text/event-stream") {
 		rec.Stream = 1

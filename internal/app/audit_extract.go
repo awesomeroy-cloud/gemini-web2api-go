@@ -400,6 +400,46 @@ func findCachedMediaFile(auditID int64, side string, idx int) (string, bool) {
 	return "", false
 }
 
+func loadCachedMediaItems(auditID int64, side string) []AuditMediaItem {
+	dir := auditMediaDir()
+	prefix := fmt.Sprintf("%d_%s_", auditID, side)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var items []AuditMediaItem
+	for _, e := range entries {
+		if e.IsDir() || strings.HasSuffix(e.Name(), ".tmp") || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(e.Name(), prefix)
+		ext := filepath.Ext(rest)
+		idxStr := strings.TrimSuffix(rest, ext)
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx < 0 {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		mime, _ := sniffMediaMIME(nil, ext)
+		items = append(items, AuditMediaItem{
+			Idx:       idx,
+			Side:      side,
+			Kind:      mimeKind(mime),
+			MIME:      mime,
+			Ext:       ext,
+			Bytes:     info.Size(),
+			HumanSize: humanBytes(info.Size()),
+			Source:    "cached_media",
+			URL:       fmt.Sprintf("/admin/api/audits/%d/media/%s/%d", auditID, side, idx),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Idx < items[j].Idx })
+	return items
+}
+
 func enforceMediaCacheLimit() {
 	auditMediaCacheMu.Lock()
 	defer auditMediaCacheMu.Unlock()
@@ -510,6 +550,18 @@ func extractAuditDetail(auditID int64, reqBody, reply, raw, reasoning, toolCalls
 	}
 	if toolCalls != "" {
 		resEx.scanTextForMedia(toolCalls, "tool_calls")
+	}
+	if len(resEx.items) == 0 {
+		if cached := loadCachedMediaItems(auditID, "res"); len(cached) > 0 {
+			resEx.items = cached
+			for _, it := range cached {
+				resBlocks = append(resBlocks, AuditContentBlock{
+					Type: it.Kind,
+					MIME: it.MIME,
+					URL:  it.URL,
+				})
+			}
+		}
 	}
 
 	if len(resBlocks) == 0 && (reply != "" || reasoning != "") {
