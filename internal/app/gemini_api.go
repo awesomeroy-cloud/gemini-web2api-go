@@ -537,10 +537,12 @@ func handleGenerateContent(w http.ResponseWriter, r *http.Request, model string)
 		if _, ok := err.(*ModelDowngradedError); ok {
 			status = 429
 		}
+		auditSetAttribution(w, res)
 		recordRequest("gemini.generateContent", g.modelName, g.prompt, "", res, status, err.Error(), false)
 		writeGeminiCallError(w, err)
 		return
 	}
+	auditSetAttribution(w, res)
 	recordRequest("gemini.generateContent", g.modelName, g.prompt, text, res, 200, "", false)
 
 	t := newGeminiTurn(text, calls, res)
@@ -682,6 +684,7 @@ func handleStreamGenerateContent(w http.ResponseWriter, r *http.Request, model s
 		if _, ok := err.(*ModelDowngradedError); ok {
 			status = 429
 		}
+		auditSetAttribution(w, res)
 		recordRequest("gemini.streamGenerateContent", g.modelName, g.prompt, "", res, status, err.Error(), true)
 		if st.Started() {
 			st.fail(err)
@@ -690,6 +693,7 @@ func handleStreamGenerateContent(w http.ResponseWriter, r *http.Request, model s
 		writeGeminiCallError(w, err)
 		return
 	}
+	auditSetAttribution(w, res)
 	recordRequest("gemini.streamGenerateContent", g.modelName, g.prompt, text, res, 200, "", true)
 
 	t := newGeminiTurn(text, calls, res)

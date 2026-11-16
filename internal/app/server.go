@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const Version = "4.28.2"
+const Version = "4.28.3"
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	body, _ := json.Marshal(data)
@@ -319,6 +319,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if downgraded {
 			status = 429
 		}
+		auditSetAttribution(w, res)
 		recordRequest("chat.completions", modelName, prompt, "", res, status, err.Error(), stream)
 		if sse != nil && sse.Started() {
 			sse.Fail(err) // 已经开流，HTTP 状态码改不了了
@@ -365,6 +366,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		finish = "tool_calls"
 	}
 
+	auditSetAttribution(w, res)
 	recordRequest("chat.completions", modelName, prompt, text, res, 200, "", stream)
 	if stream {
 		var usage map[string]int
@@ -693,6 +695,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		if downgraded {
 			status = 429
 		}
+		auditSetAttribution(w, res)
 		recordRequest("responses", modelName, prompt, "", res, status, err.Error(), stream)
 		if stream {
 			errObj := map[string]string{"message": err.Error()}
@@ -760,6 +763,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	auditSetAttribution(w, res)
 	recordRequest("responses", modelName, prompt, text, res, 200, "", stream)
 	if stream {
 		// 补上闸门扣住、或前缀 diff 跳过的尾巴，再发终态事件。

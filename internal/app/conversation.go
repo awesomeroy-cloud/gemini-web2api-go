@@ -30,6 +30,7 @@ type convState struct {
 	isLogin               bool
 	temp                  bool   // 首轮即走网页端原生临时对话（inner[45]=1），不进账号会话列表
 	accountID             int64
+	accountLabel          string
 	authuser              int // 登录号的账号序号（/u/N）；整条会话不变，匿名为 0
 	proxyID               int64
 	proxyURL              string
@@ -433,7 +434,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		if tok, err := getXSRF(conv.cookie, conv.authuser, proxyURL); err == nil {
 			xsrf = tok
 		} else {
-			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID},
+			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID, AccountLabel: conv.accountLabel},
 				fmt.Errorf("取 XSRF 失败: %w", err)
 		}
 	}
@@ -515,7 +516,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		// 降级：同一个号重试还是降级，直接交给上层（见 gemini.go 同一处）。
 		var mde *ModelDowngradedError
 		if errors.As(err, &mde) {
-			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID,
+			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID, AccountLabel: conv.accountLabel,
 				UpstreamModel: mde.Reported, TotalMs: time.Since(t0).Milliseconds(),
 				Emitted: tracker.emitted, EmittedReasoning: rtracker.emitted}, err
 		}
@@ -583,11 +584,12 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 			ProxyID:          p.ID,
 			ProxyName:        p.Name,
 			AccountID:        conv.accountID,
+			AccountLabel:     conv.accountLabel,
 			TTFBMs:           ttfb,
 			TotalMs:          time.Since(t0).Milliseconds(),
 		}, nil
 	}
-	return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, lastErr
+	return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID, AccountLabel: conv.accountLabel}, lastErr
 }
 
 // callGeminiConv 是多轮开启时的入口：按历史前缀识别续接。
@@ -641,6 +643,7 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 					conv.sapisid = extractSAPISID(a.Cookie)
 					conv.isLogin = true
 					conv.accountID = a.ID
+					conv.accountLabel = accountDisplayName(a)
 					conv.authuser = a.AuthUser
 					conv.proxyID = a.ProxyID
 				}

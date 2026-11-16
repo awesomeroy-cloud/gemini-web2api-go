@@ -110,6 +110,7 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		} else if _, ok := err.(*RateLimitError); ok {
 			status, errType = 429, "rate_limit_error"
 		}
+		auditSetAttribution(w, res)
 		recordRequest("anthropic.messages", modelName, prompt, "", res, status, err.Error(), stream)
 		if asse != nil && asse.Started() {
 			asse.Fail(errType, err.Error())
@@ -128,6 +129,7 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		stopReason = "tool_use"
 	}
 	outTokens := countTokens(stripDataURLs(text))
+	auditSetAttribution(w, res)
 	recordRequest("anthropic.messages", modelName, prompt, text, res, 200, "", stream)
 
 	if stream {

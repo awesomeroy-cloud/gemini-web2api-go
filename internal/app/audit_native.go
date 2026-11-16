@@ -336,7 +336,20 @@ type auditWriter struct {
 	chunks      int
 	rawBytes    int
 	truncated   bool
+	account     string
+	proxy       string
 	buf         bytes.Buffer
+}
+
+// auditSetAttribution records account and proxy attribution on the active auditWriter.
+func auditSetAttribution(w http.ResponseWriter, res *StreamResult) {
+	if res == nil {
+		return
+	}
+	if aw, ok := w.(*auditWriter); ok {
+		aw.account = res.AccountLabel
+		aw.proxy = res.ProxyName
+	}
 }
 
 func (aw *auditWriter) Header() http.Header {
@@ -523,6 +536,8 @@ func buildAuditRecord(r *http.Request, reqBody []byte, aw *auditWriter, startedA
 		RawBytes:    aw.rawBytes,
 		V:           2,
 		KeyFP:       auditKeyFingerprint(r),
+		Account:     aw.account,
+		Proxy:       aw.proxy,
 		Chunks:      aw.chunks,
 		UserAgent:   r.UserAgent(),
 		RequestBody: reqStr,
